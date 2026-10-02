@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Flappy Vanik</title>
+<meta name="description" content="Flappy Vanik — помоги Ванику пролететь между трубами! Бесплатная игра прямо в браузере.">
+<meta name="theme-color" content="#2F9BEF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Flappy Vanik">
+<meta property="og:title" content="Flappy Vanik">
+<meta property="og:description" content="Помоги Ванику пролететь между трубами!">
+<meta property="og:image" content="og.jpg">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #14213D;
+    touch-action: none; overscroll-behavior: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+  }
+  #game { position: fixed; display: block; touch-action: none; }
+  #safe {
+    position: fixed; top: 0; left: 0; width: 0; visibility: hidden; pointer-events: none;
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #loading {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #fff; font: 700 16px system-ui, sans-serif; background: #2F9BEF;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="safe"></div>
+<div id="loading">Загрузка…</div>
+<script>
+"use strict";
+(() => {
+  // ---------- Настройки (единицы дизайна, умножаются на u) ----------
+  const CFG = {
+    gravity: 1750, flap: 540, maxFall: 900, speed: 175,
+    pipeWidth: 76, pipeSpacing: 235, baseGap: 178, minGap: 148,
+    birdHeight: 70, hitRadius: 22,
+  };
+  const OUTLINE = "#14213D";
+  const FONT = '"Press Start 2P", "Arial Black", "Avenir Next", system-ui, sans-serif';
+  const PIXEL_FONT_SCALE = 0.62; // Press Start 2P очень широкий
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+
+  // ---------- Картинки ----------
+  const img = (src) => new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = src; });
+
+  // ---------- Звук (синтез через WebAudio) ----------
+  const Audio = {
+    ctx: null, buffers: {}, muted: store.get("muted", "0") === "1",
+    unlock() {
+      if (!this.ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        this.ctx = new AC();
+        this.build();
+      }
+      if (this.ctx.state === "suspended") this.ctx.resume();
+    },
+    build() {
+      const sr = this.ctx.sampleRate;
+      const make = (dur, fn) => {
+        const n = Math.floor(sr * dur), b = this.ctx.createBuffer(1, n, sr), d = b.getChannelData(0);
+        fn(d, n, sr);
+        return b;
+      };
+      let seed = 1; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 * 2 - 1; };
+      const env = (i, n, a, r) => Math.min(1, i / (sr * a)) * Math.exp(-i / n * r);
+      this.buffers.flap = make(0.12, (d, n) => {
+        let ph = 0, lp = 0;
+        for (let i = 0; i < n; i++) {
+          ph += 2 * Math.PI * (500 + 400 * i / n) / sr; lp += 0.15 * (rnd() - lp);
+          d[i] = (0.25 * Math.sin(ph) + 1.6 * lp) * env(i, n, 0.01, 6) * 0.7;
+        }
+      });
+      const tone = (d, start, len, f, r) => {
+        for (let i = 0; i < len; i++) {
+          const s = Math.sin(2 * Math.PI * f * i / sr);
+          d[start + i] = (Math.sign(s) * 0.25 + s * 0.4) * env(i, len, 0.002, r) * 0.8;
+        }
+      };
+      this.buffers.point = make(0.33, (d) => { tone(d, 0, Math.floor(sr * 0.08), 988, 1); tone(d, Math.floor(sr * 0.08), Math.floor(sr * 0.25), 1319, 5); });
+      this.buffers.hit = make(0.2, (d, n) => {
+        let ph = 0;
+        for (let i = 0; i < n; i++) { ph += 2 * Math.PI * (160 - 110 * i / n) / sr; d[i] = (Math.sin(ph) + rnd() * 0.6) * env(i, n, 0.001, 9) * 0.8; }
+      });
+      this.buffers.die = make(0.5, (d, n) => {
+        let ph = 0;
+        for (let i = 0; i < n; i++) { ph += 2 * Math.PI * (700 - 550 * i / n) / sr; const s = Math.sin(ph); d[i] = (Math.sign(s) * 0.2 + s * 0.35) * env(i, n, 0.01, 3); }
+      });
+      this.buffers.swoosh = make(0.35, (d, n) => {
+        let y = 0;
+        for (let i = 0; i < n; i++) { y += (0.02 + 0.23 * i / n) * (rnd() - y); d[i] = y * 2.2 * Math.sin(Math.PI * i / n); }
+      });
+    },
+    play(name) {
+      if (this.muted || !this.ctx || !this.buffers[name]) return;
+      const s = this.ctx.createBufferSource();
+      s.buffer = this.buffers[name];
+      s.connect(this.ctx.destination);
+      s.start();
+    },
+  };
+  const vibrate = (ms) => { if (navigator.vibrate) try { navigator.vibrate(ms); } catch {} };
+
+  // ---------- Размеры ----------
+  let W = 0, H = 0, dpr = 1, u = 1, block = 4, groundTop = 100, groundY = 0, tileW = 0;
+  let safeTop = 0, safeBottom = 0;
+  let tex = {};
+
+  function readSafe() {
+    const cs = getComputedStyle(document.getElementById("safe"));
+    safeTop = parseFloat(cs.paddingTop) || 0;
+    safeBottom = parseFloat(cs.paddingBottom) || 0;
+  }
+
+  function resize() {
+    readSafe();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    H = vh;
+    W = Math.min(vw, Math.round(vh * 0.62)); // на компьютере — «телефонный» экран по центру
+    dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.style.width = W + "px"; canvas.style.height = H + "px";
+    canvas.style.left = Math.round((vw - W) / 2) + "px"; canvas.style.top = "0px";
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+
+    u = Math.min(H / 760, W / 360);
+    block = Math.max(3, Math.round(4 * u));
+    groundTop = Math.round(100 * u + safeBottom * 0.5);
+    groundY = H - groundTop;
+    tileW = Math.ceil(W / (block * 4)) * block * 4;
+    buildTextures();
+    if (game) game.onResize();
+  }
+
+  // ---------- Пиксельная графика ----------
+  function offscreen(w, h, draw) {
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(w * dpr)); c.height = Math.max(1, Math.round(h * dpr));
+    const g = c.getContext("2d");
+    g.scale(dpr, dpr);
+    draw(g);
+    c.w = w; c.h = h;
+    return c;
+  }
+  const rect = (g, color, x, y, w, h) => { g.fillStyle = color; g.fillRect(x, y, w, h); };
+  const mixHex = (a, b, t) => {
+    const pa = [1, 3, 5].map(i => parseInt(a.slice(i, i + 2), 16)), pb = [1, 3, 5].map(i => parseInt(b.slice(i, i + 2), 16));
+    return `rgb(${pa.map((v, i) => Math.round(v + (pb[i] - v) * t)).join(",")})`;
+  };
+  const CLOUD = [
+    ".....XXXX.........",
+    "...XXXXXXXX..XXX..",
+    "..XXXXXXXXXXXXXXX.",
+    ".XXXXXXXXXXXXXXXXX",
+    "XXXXXXXXXXXXXXXXXX",
+    "XXXSSXXXXXXSSSXXXX",
+    "SSSSSSSSSSSSSSSSSS",
+  ];
+  function drawCloud(g, ox, oy, b) {
+    CLOUD.forEach((row, r) => [...row].forEach((ch, c) => {
+      if (ch !== ".") rect(g, ch === "X" ? "#fff" : "#CDEBFB", ox + c * b, oy + r * b, b + 0.5, b + 0.5);
+    }));
+  }
+
+  function buildTextures() {
+    const b = block;
+    tex.sky = offscreen(W, H, (g) => {
+      for (let i = 0; i < 10; i++) rect(g, mixHex("#2F9BEF", "#8ED6FB", i / 9), 0, i * H / 10, W, H / 10 + 1);
+      drawCloud(g, W * 0.08, H * 0.16, b * 0.8);
+      drawCloud(g, W * 0.62, H * 0.26, b * 0.65);
+    });
+
+    const ch = Math.round(150 * u / b) * b;
+    tex.clouds = offscreen(tileW, ch, (g) => {
+      rect(g, "#E6F6FE", 0, ch * 0.62, tileW, ch * 0.38 + 1);
+      const cw = CLOUD[0].length * b, offs = [0.30, 0.18, 0.36, 0.24, 0.12];
+      for (let x = 0, i = 0; x + cw <= tileW; x += cw * 0.7, i++) drawCloud(g, x, ch * offs[i % 5] + ch * 0.2, b);
+      rect(g, "#fff", 0, ch * 0.55, tileW, ch * 0.08);
+    });
+
+    const hh = Math.round(90 * u / b) * b;
+    tex.hills = offscreen(tileW, hh, (g) => {
+      const cols = Math.round(tileW / b);
+      for (let c = 0; c < cols; c++) {
+        const x = c / cols;
+        const h = Math.max(0.2, Math.min(0.98, 0.55 + 0.22 * Math.sin(4 * Math.PI * x) + 0.12 * Math.sin(10 * Math.PI * x + 1.3)));
+        const hb = Math.round(h * hh / b) * b, top = hh - hb;
+        rect(g, "#5CC43B", c * b, top, b + 0.5, hb);
+        rect(g, "#2E7D1F", c * b, top, b + 0.5, b);
+        rect(g, "#86DE5A", c * b, top + b, b + 0.5, b);
+        if (c % 7 === 3) rect(g, "#86DE5A", c * b, top + b * 4, b, b);
+      }
+    });
+
+    tex.ground = offscreen(tileW, groundTop, (g) => {
+      const cols = Math.round(tileW / b), rows = Math.round(groundTop / b) + 1;
+      for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
+        let col;
+        if (r === 0) col = OUTLINE;
+        else if (r <= 3) col = (Math.floor(c / 2) + r) % 2 === 0 ? "#6BD13F" : "#58B532";
+        else if (r === 4) col = "#3F8A24";
+        else if (r === 5) col = "#5E3A1A";
+        else {
+          const checker = (Math.floor(c / 2) + Math.floor(r / 2)) % 2 === 0;
+          col = (c * 7 + r * 13) % 23 === 0 ? "#B98450" : checker ? "#9B6634" : "#875628";
+        }
+        rect(g, col, c * b, r * b, b + 0.5, b + 0.5);
+      }
+    });
+
+    const bodyW = Math.round(CFG.pipeWidth * u / b) * b, over = b, capH = b * 7, pw = bodyW + over * 2;
+    tex.pipeBody = bodyW; tex.pipeCapH = capH;
+    tex.pipe = offscreen(pw, H, (g) => {
+      const column = (i, n) => {
+        if (i === 0 || i === n - 1) return OUTLINE;
+        const f = i / n;
+        return f < 0.14 ? "#4CA235" : f < 0.32 ? "#A8EA6A" : f < 0.68 ? "#6CC64A" : f < 0.86 ? "#4FA837" : "#3E8A2A";
+      };
+      const bc = Math.round(bodyW / b);
+      for (let i = 0; i < bc; i++) rect(g, column(i, bc), over + i * b, capH, b + 0.5, H - capH);
+      const cc = Math.round(pw / b);
+      for (let i = 0; i < cc; i++) rect(g, column(i, cc), i * b, 0, b + 0.5, capH);
+      rect(g, OUTLINE, 0, 0, pw, b);
+      rect(g, OUTLINE, 0, capH - b, pw, b);
+      rect(g, "#3E8A2A", over, capH, bodyW, b);
+    });
+  }
+
+  // ---------- Текст с обводкой ----------
+  function text(str, x, y, size, color = "#fff", opts = {}) {
+    const { align = "center", outline = OUTLINE, stroke = Math.max(2, size * (fontReady ? 0.16 : 0.08)), alpha = 1 } = opts;
+    const fs = fontReady ? size * PIXEL_FONT_SCALE : size;
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.font = `${fontReady ? "" : "900 "}${fs}px ${FONT}`;
+    ctx.textAlign = align; ctx.textBaseline = "middle";
+    ctx.lineJoin = "round";
+    ctx.lineWidth = stroke * 2;
+    ctx.strokeStyle = outline;
+    ctx.strokeText(str, x, y + stroke * 0.8);   // тень
+    ctx.strokeText(str, x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(str, x, y);
+    ctx.restore();
+  }
+  let fontReady = false;
+
+  function roundRect(x, y, w, h, r, fill, strokeColor, lw) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (strokeColor) { ctx.strokeStyle = strokeColor; ctx.lineWidth = lw; ctx.stroke(); }
+  }
+
+  const easeOut = (t) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
+  const easeBack = (t) => { t = Math.min(1, Math.max(0, t)); const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+
+  // ---------- Игра ----------
+  const MEDALS = [
+    { min: 40, name: "ПЛАТИНА", color: "#A6F0FF" },
+    { min: 30, name: "ЗОЛОТО", color: "#FFD23F" },
+    { min: 20, name: "СЕРЕБРО", color: "#C9D1D9" },
+    { min: 10, name: "БРОНЗА", color: "#D08A3C" },
+  ];
+
+  let game = null;
+  class Game {
+    constructor(images) {
+      this.vanik = images.vanik;
+      this.title = images.title;
+      this.best = parseInt(store.get("bestScore", "0"), 10) || 0;
+      this.t = 0;
+      this.scroll = { ground: 0, hills: 0, clouds: 0 };
+      this.buttons = [];
+      this.reset();
+    }
+    get birdX() { return W * 0.3; }
+    get birdStartY() { return groundY - (groundY) * 0.48; }
+    onResize() { if (this.state === "ready") this.bird.y = this.birdStartY; }
+
+    reset() {
+      this.state = "ready";
+      this.stateTime = 0;
+      this.score = 0;
+      this.pipes = [];
+      this.lastGap = null;
+      this.bird = { y: this.birdStartY, vy: 0, rot: 0, squash: 0 };
+      this.flash = 0; this.shake = 0;
+      this.scorePop = 0;
+      this.over = null;
+      this.buttons = [];
+    }
+    setState(s) { this.state = s; this.stateTime = 0; }
+
+    start() {
+      this.setState("playing");
+      this.nextPipe = 140 * u;
+    }
+    flap() {
+      this.bird.vy = -CFG.flap * u;
+      this.bird.squash = 1;
+      Audio.play("flap");
+    }
+    tap(x, y) {
+      Audio.unlock();
+      if (this.muteRect && this.state !== "playing" && x >= this.muteRect.x && x <= this.muteRect.x + this.muteRect.w && y >= this.muteRect.y && y <= this.muteRect.y + this.muteRect.h) {
+        Audio.muted = !Audio.muted; store.set("muted", Audio.muted ? "1" : "0");
+        return;
+      }
+      switch (this.state) {
+        case "ready": this.start(); this.flap(); break;
+        case "playing": this.flap(); break;
+        case "over":
+          if (this.stateTime < 0.95) return;
+          for (const b of this.buttons) {
+            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.pressed = 0.15; Audio.play("swoosh"); setTimeout(b.action, 120); return; }
+          }
+          break;
+      }
+    }
+    key() {
+      Audio.unlock();
+      if (this.state === "ready") { this.start(); this.flap(); }
+      else if (this.state === "playing") this.flap();
+      else if (this.state === "over" && this.stateTime >= 0.95) { Audio.play("swoosh"); this.restart(); }
+    }
+    restart() {
+      if (this.curtain) return;
+      this.curtain = { t: 0, swapped: false };
+    }
+
+    crash(onGround) {
+      if (this.state !== "playing") return;
+      Audio.play("hit");
+      vibrate(80);
+      this.flash = 1; this.shake = 0.22;
+      this.bird.squash = 0;
+      if (onGround) this.finish();
+      else {
+        this.setState("dying");
+        this.bird.vy = Math.max(this.bird.vy, 0);
+        setTimeout(() => Audio.play("die"), 200);
+      }
+    }
+    finish() {
+      this.setState("over");
+      const isNew = this.score > this.best;
+      if (isNew) { this.best = this.score; store.set("bestScore", String(this.best)); }
+      const medal = MEDALS.find(m => this.score >= m.min) || null;
+      this.over = { isNew, medal, shownScore: 0 };
+      setTimeout(() => Audio.play("swoosh"), 450);
+    }
+
+    spawnPipe() {
+      const gap = Math.max(CFG.minGap, CFG.baseGap - this.score) * u;
+      const margin = 60 * u;
+      const lo = safeTop + margin + gap / 2;          // y-вниз: верхняя граница
+      const hi = Math.max(lo, groundY - margin - gap / 2);
+      let y = lo + Math.random() * (hi - lo);
+      if (this.lastGap !== null) { const j = 210 * u; y = Math.min(Math.max(y, this.lastGap - j), this.lastGap + j); }
+      this.lastGap = y;
+      this.pipes.push({ x: W + tex.pipe.w, gapY: y, gap, passed: false });
+    }
+
+    update(dt) {
+      this.t += dt; this.stateTime += dt;
+      this.flash = Math.max(0, this.flash - dt * 4);
+      this.shake = Math.max(0, this.shake - dt);
+      this.scorePop = Math.max(0, this.scorePop - dt * 6);
+      this.bird.squash = Math.max(0, this.bird.squash - dt * 7);
+      for (const b of this.buttons) if (b.pressed) b.pressed = Math.max(0, b.pressed - dt);
+
+      if (this.curtain) {
+        this.curtain.t += dt;
+        if (!this.curtain.swapped && this.curtain.t >= 0.18) { this.curtain.swapped = true; this.reset(); }
+        if (this.curtain.t >= 0.4) this.curtain = null;
+      }
+
+      const dx = CFG.speed * u * dt;
+      const s = this.state;
+      if (s === "ready" || s === "playing") {
+        this.scroll.ground = (this.scroll.ground + dx) % tileW;
+        this.scroll.hills = (this.scroll.hills + dx * 0.35) % tileW;
+        this.scroll.clouds = (this.scroll.clouds + dx * 0.15) % tileW;
+      }
+      const bird = this.bird, r = CFG.hitRadius * u;
+
+      if (s === "ready") {
+        bird.y = this.birdStartY + Math.sin(this.t * 4) * 9 * u;
+        bird.rot = 0;
+        return;
+      }
+      if (s === "playing" || s === "dying") {
+        bird.vy = Math.min(bird.vy + CFG.gravity * u * dt, CFG.maxFall * u);
+        bird.y += bird.vy * dt;
+        if (bird.y < r) { bird.y = r; bird.vy = Math.max(bird.vy, 0); }
+        const target = Math.max(-0.4, Math.min(1.4, bird.vy / (CFG.flap * u) * 0.8));
+        const k = Math.min(1, dt * (target > bird.rot ? 6 : 14));
+        bird.rot += (target - bird.rot) * k;
+      }
+      if (s === "dying") {
+        if (bird.y + r >= groundY) { bird.y = groundY - r; this.finish(); }
+        return;
+      }
+      if (s === "playing") {
+        for (const p of this.pipes) p.x -= dx;
+        this.pipes = this.pipes.filter(p => p.x > -tex.pipe.w);
+        this.nextPipe -= dx;
+        if (this.nextPipe <= 0) { this.spawnPipe(); this.nextPipe += CFG.pipeSpacing * u; }
+        for (const p of this.pipes) {
+          if (!p.passed && p.x < this.birdX) { p.passed = true; this.score++; this.scorePop = 1; Audio.play("point"); }
+        }
+        this.collide();
+      }
+      if (s === "over" && this.over) {
+        const t = this.stateTime - 0.65;
+        this.over.shownScore = Math.round(this.score * Math.min(1, Math.max(0, t / 0.5)));
+      }
+    }
+
+    collide() {
+      const cx = this.birdX, cy = this.bird.y, r = CFG.hitRadius * u;
+      if (cy + r >= groundY) { this.bird.y = groundY - r; this.crash(true); return; }
+      const half = CFG.pipeWidth * u / 2, b = block, capH = tex.pipeCapH;
+      const hit = (x, y, w, h) => {
+        const nx = Math.max(x, Math.min(cx, x + w)), ny = Math.max(y, Math.min(cy, y + h));
+        return (cx - nx) ** 2 + (cy - ny) ** 2 < r * r;
+      };
+      for (const p of this.pipes) {
+        if (Math.abs(p.x - cx) > half + r + b) continue;
+        const top = p.gapY - p.gap / 2, bottom = p.gapY + p.gap / 2;
+        if (hit(p.x - half, -10000, half * 2, top + 10000) ||
+            hit(p.x - half, bottom, half * 2, 10000) ||
+            hit(p.x - half - b, top - capH, (half + b) * 2, capH) ||
+            hit(p.x - half - b, bottom, (half + b) * 2, capH)) { this.crash(false); return; }
+      }
+    }
+
+    // ---------- Отрисовка ----------
+    drawTiles(c, offset, y) {
+      const x = -Math.floor(offset);
+      ctx.drawImage(c, x, y, c.w, c.h);
+      ctx.drawImage(c, x + tileW, y, c.w, c.h);
+    }
+
+    draw() {
+      ctx.save();
+      if (this.shake > 0) {
+        const m = 7 * u * (this.shake / 0.22);
+        ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
+      }
+      ctx.drawImage(tex.sky, 0, 0, W, H);
+      this.drawTiles(tex.clouds, this.scroll.clouds, groundY - tex.clouds.h);
+      this.drawTiles(tex.hills, this.scroll.hills, groundY - tex.hills.h + block);
+
+      const pw = tex.pipe.w;
+      for (const p of this.pipes) {
+        ctx.drawImage(tex.pipe, p.x - pw / 2, p.gapY + p.gap / 2, pw, H);
+        ctx.save();
+        ctx.translate(p.x, p.gapY - p.gap / 2);
+        ctx.scale(1, -1);
+        ctx.drawImage(tex.pipe, -pw / 2, 0, pw, H);
+        ctx.restore();
+      }
+      this.drawTiles(tex.ground, this.scroll.ground, groundY);
+      this.drawBird();
+      ctx.restore();
+
+      this.drawUI();
+
+      if (this.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, W, H); }
+      if (this.curtain) {
+        const t = this.curtain.t, a = t < 0.18 ? t / 0.18 : 1 - (t - 0.18) / 0.22;
+        ctx.fillStyle = `rgba(0,0,0,${Math.max(0, a)})`; ctx.fillRect(0, 0, W, H);
+      }
+    }
+
+    drawBird() {
+      const h = CFG.birdHeight * u, w = h * (this.vanik ? this.vanik.width / this.vanik.height : 1);
+      const b = this.bird;
+      const flutter = (this.state === "ready" || this.state === "playing") ? 1 - 0.035 * (1 + Math.sin(this.t * 28)) : 1;
+      const sx = 1 + 0.08 * b.squash, sy = flutter * (1 - 0.14 * b.squash);
+      ctx.save();
+      ctx.translate(this.birdX, b.y);
+      ctx.rotate(b.rot);
+      ctx.scale(sx, sy);
+      ctx.imageSmoothingEnabled = true;
+      if (this.vanik) ctx.drawImage(this.vanik, -w / 2, -h / 2, w, h);
+      else { ctx.fillStyle = "#FFD23F"; ctx.beginPath(); ctx.arc(0, 0, h / 2, 0, 7); ctx.fill(); }
+      ctx.restore();
+    }
+
+    drawMute() {
+      const s = 34 * u, x = W - s - 12 * u, y = safeTop + 12 * u;
+      this.muteRect = { x: x - 8 * u, y: y - 8 * u, w: s + 16 * u, h: s + 16 * u };
+      roundRect(x, y, s, s, 8 * u, "rgba(20,33,61,0.35)");
+      ctx.save();
+      ctx.translate(x + s / 2, y + s / 2);
+      ctx.fillStyle = "#fff";
+      ctx.beginPath();
+      const k = s / 34;
+      ctx.moveTo(-10 * k, -5 * k); ctx.lineTo(-4 * k, -5 * k); ctx.lineTo(3 * k, -11 * k);
+      ctx.lineTo(3 * k, 11 * k); ctx.lineTo(-4 * k, 5 * k); ctx.lineTo(-10 * k, 5 * k); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5 * k; ctx.lineCap = "round";
+      if (Audio.muted) {
+        ctx.beginPath(); ctx.moveTo(7 * k, -6 * k); ctx.lineTo(14 * k, 6 * k); ctx.moveTo(14 * k, -6 * k); ctx.lineTo(7 * k, 6 * k); ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.arc(4 * k, 0, 6 * k, -0.9, 0.9); ctx.stroke();
+        ctx.beginPath(); ctx.arc(4 * k, 0, 11 * k, -0.9, 0.9); ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    drawUI() {
+      const s = this.state;
+      if (s === "ready") {
+        const a = Math.min(1, this.stateTime / 0.3);
+        ctx.save(); ctx.globalAlpha = a;
+        if (this.title) {
+          const tw = Math.min(W * 0.86, 330 * u), th = tw * this.title.height / this.title.width;
+          ctx.imageSmoothingEnabled = true;
+          ctx.drawImage(this.title, (W - tw) / 2, safeTop + 40 * u + Math.sin(this.t * 3.5) * 6 * u, tw, th);
+        }
+        const pulse = 1 + 0.06 * Math.sin(this.t * 6);
+        ctx.font = `${40 * u}px system-ui`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("👆", W / 2, groundY - 120 * u + Math.sin(this.t * 9) * 6 * u);
+        ctx.save(); ctx.translate(W / 2, groundY - 70 * u); ctx.scale(pulse, pulse);
+        text("ТАПНИ, ЧТОБЫ ЛЕТЕТЬ!", 0, 0, 22 * u, "#FFD23F");
+        ctx.restore();
+        if (this.best > 0) text(`РЕКОРД: ${this.best}`, W / 2, groundY - 34 * u, 20 * u);
+        ctx.restore();
+        this.drawMute();
+      } else if (s === "playing" || s === "dying") {
+        const pop = 1 + 0.25 * Math.sin(this.scorePop * Math.PI);
+        ctx.save();
+        ctx.translate(W / 2, safeTop + 60 * u);
+        ctx.scale(pop, pop);
+        text(String(this.score), 0, 0, 56 * u, "#fff", { alpha: s === "dying" ? Math.max(0, 1 - this.stateTime * 4) : 1 });
+        ctx.restore();
+      } else if (s === "over") {
+        this.drawGameOver();
+        this.drawMute();
+      }
+    }
+
+    drawGameOver() {
+      const t = this.stateTime, o = this.over;
+      const centerY = groundY * 0.5 + safeTop * 0.5;
+
+      // заголовок
+      const ta = Math.min(1, Math.max(0, (t - 0.45) / 0.25));
+      text("ИГРА ОКОНЧЕНА", W / 2, centerY - 150 * u - 30 * u * (1 - easeOut(ta)), 32 * u, "#FFB627", { alpha: ta });
+
+      // панель
+      const pw = Math.min(W * 0.86, 310 * u), ph = 170 * u;
+      const pt = easeOut((t - 0.75) / 0.35);
+      const py = H + ph - (H + ph - (centerY - 30 * u)) * pt;  // центр панели
+      const px = W / 2;
+      if (pt > 0) {
+        roundRect(px - pw / 2, py - ph / 2, pw, ph, 14 * u, "#FFF1C1", OUTLINE, 5 * u);
+        roundRect(px - pw / 2 + 11 * u, py - ph / 2 + 11 * u, pw - 22 * u, ph - 22 * u, 9 * u, null, "#E3C774", 3 * u);
+
+        // медаль
+        const mx = px - pw / 2 + 70 * u, my = py + 12 * u;
+        text("МЕДАЛЬ", mx, py - 50 * u, 15 * u, "#F07E2A", { outline: "#fff", stroke: 2.5 * u });
+        const ms = o.medal ? easeBack((t - 1.6) / 0.3) : 1;
+        ctx.save();
+        ctx.translate(mx, my);
+        ctx.rotate(o.medal ? Math.sin(this.t * 2.6) * 0.08 : 0);
+        ctx.scale(ms, ms);
+        ctx.beginPath(); ctx.arc(0, 0, 34 * u, 0, Math.PI * 2);
+        ctx.fillStyle = o.medal ? o.medal.color : "#E8D9A0"; ctx.fill();
+        ctx.lineWidth = 4 * u; ctx.strokeStyle = OUTLINE; ctx.stroke();
+        if (o.medal) {
+          ctx.beginPath(); ctx.arc(0, 0, 25 * u, 0, Math.PI * 2);
+          ctx.lineWidth = 3 * u; ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.stroke();
+          ctx.beginPath();
+          for (let i = 0; i < 10; i++) {
+            const rr = (i % 2 ? 0.45 : 1) * 17 * u, a = i * Math.PI / 5 - Math.PI / 2;
+            const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+          }
+          ctx.closePath(); ctx.fillStyle = "#fff"; ctx.fill(); ctx.lineWidth = 2 * u; ctx.strokeStyle = OUTLINE; ctx.stroke();
+        }
+        ctx.restore();
+        if (o.medal && ms > 0.5) text(o.medal.name, mx, my + 48 * u, 12 * u, "#fff", { stroke: 2 * u });
+
+        // счёт и рекорд
+        const rx = px + pw / 2 - 26 * u;
+        text("СЧЁТ", rx, py - 50 * u, 15 * u, "#F07E2A", { align: "right", outline: "#fff", stroke: 2.5 * u });
+        text(String(o.shownScore), rx, py - 20 * u, 32 * u, "#fff", { align: "right" });
+        text("РЕКОРД", rx, py + 18 * u, 15 * u, "#F07E2A", { align: "right", outline: "#fff", stroke: 2.5 * u });
+        text(String(this.best), rx, py + 48 * u, 32 * u, "#fff", { align: "right" });
+        if (o.isNew && t > 1.75) {
+          const sc = 1 + 0.08 * Math.sin(this.t * 10);
+          ctx.save(); ctx.translate(rx - 108 * u, py + 48 * u); ctx.scale(sc, sc);
+          roundRect(-27 * u, -11 * u, 54 * u, 22 * u, 5 * u, "#E63946", OUTLINE, 2.5 * u);
+          ctx.font = `900 ${13 * u}px system-ui, sans-serif`; ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText("NEW", 0, 1 * u);
+          ctx.restore();
+        }
+      }
+
+      // кнопки
+      const ba = Math.min(1, Math.max(0, (t - 1.2) / 0.2));
+      const by = centerY - 30 * u + ph / 2 + 28 * u;
+      const bw = Math.min((pw - 16 * u) / 2, 145 * u), bh = 54 * u;
+      if (!this.buttons.length) {
+        this.buttons = [
+          { label: "ЗАНОВО", color: "#6CC64A", action: () => this.restart() },
+          { label: "ПОДЕЛИТЬСЯ", color: "#FFB627", action: () => share(this.score) },
+        ];
+      }
+      this.buttons.forEach((b, i) => {
+        b.w = bw; b.h = bh;
+        b.x = i === 0 ? W / 2 - bw - 8 * u : W / 2 + 8 * u;
+        b.y = by;
+        if (ba <= 0) return;
+        const sc = b.pressed ? 0.92 : 1;
+        ctx.save();
+        ctx.globalAlpha = ba;
+        ctx.translate(b.x + bw / 2, b.y + bh / 2); ctx.scale(sc, sc);
+        roundRect(-bw / 2, -bh / 2, bw, bh, 10 * u, b.color, OUTLINE, 4 * u);
+        roundRect(-bw / 2 + 8 * u, -bh / 2 + 7 * u, bw - 16 * u, 6 * u, 3 * u, "rgba(255,255,255,0.45)");
+        text(b.label, 0, 2 * u, (b.label.length > 7 ? 15 : 19) * u, "#fff", { stroke: 3 * u });
+        ctx.restore();
+      });
+    }
+  }
+
+  async function share(score) {
+    const url = location.href.split("#")[0];
+    const msg = `Я набрал ${score} в Flappy Vanik! Сможешь больше?`;
+    try {
+      if (navigator.share) { await navigator.share({ title: "Flappy Vanik", text: msg, url }); return; }
+      await navigator.clipboard.writeText(`${msg} ${url}`);
+      toast("Ссылка скопирована!");
+    } catch {}
+  }
+  let toastState = null;
+  function toast(msg) { toastState = { msg, t: 0 }; }
+
+  // ---------- Ввод ----------
+  function pointer(e) {
+    e.preventDefault();
+    if (!game) return;
+    const r = canvas.getBoundingClientRect();
+    game.tap(e.clientX - r.left, e.clientY - r.top);
+  }
+  canvas.addEventListener("pointerdown", pointer, { passive: false });
+  document.addEventListener("keydown", (e) => {
+    if (e.repeat) return;
+    if (e.code === "Space" || e.code === "ArrowUp" || e.code === "Enter") { e.preventDefault(); game && game.key(); }
+  });
+  ["touchstart", "touchmove", "gesturestart", "dblclick"].forEach(ev =>
+    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+  document.addEventListener("visibilitychange", () => { last = performance.now(); });
+
+  // ---------- Цикл ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 1 / 30);
+    last = now;
+    if (game) {
+      game.update(dt);
+      game.draw();
+      if (toastState) {
+        toastState.t += dt;
+        const a = toastState.t < 0.2 ? toastState.t / 0.2 : toastState.t > 2.2 ? Math.max(0, 1 - (toastState.t - 2.2) / 0.3) : 1;
+        text(toastState.msg, W / 2, groundY + groundTop / 2, 15 * u, "#fff", { alpha: a });
+        if (toastState.t > 2.5) toastState = null;
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+
+  async function boot() {
+    resize();
+    window.addEventListener("resize", resize);
+    window.addEventListener("orientationchange", () => setTimeout(resize, 200));
+    const fontP = (document.fonts && document.fonts.load)
+      ? Promise.race([document.fonts.load(`16px "Press Start 2P"`), new Promise(r => setTimeout(r, 2500))])
+          .then(() => { fontReady = document.fonts.check(`16px "Press Start 2P"`); })
+          .catch(() => {})
+      : Promise.resolve();
+    const [vanik, title] = await Promise.all([img("vanik.png"), img("title.png"), fontP]);
+    game = new Game({ vanik, title });
+    if (location.hash === "#debug") window.__game = game;
+    document.getElementById("loading").remove();
+    requestAnimationFrame(frame);
+  }
+  boot();
+
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
+})();
+</script>
+</body>
+</html>
