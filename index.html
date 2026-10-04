@@ -36,21 +36,88 @@
     position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
     color: #fff; font: 700 16px system-ui, sans-serif; background: #2F9BEF;
   }
+  /* ---------- Таблица рекордов ---------- */
+  .lb {
+    position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    background: rgba(20, 33, 61, 0.55); touch-action: auto;
+    font-family: "Press Start 2P", "Arial Black", system-ui, sans-serif; color: #14213D;
+    -webkit-user-select: text; user-select: text;
+  }
+  .lb[hidden] { display: none; }
+  .lb-card {
+    position: relative; box-sizing: border-box; width: min(340px, 100%); max-height: 100%; overflow: auto;
+    background: #FFF1C1; border: 5px solid #14213D; border-radius: 14px;
+    box-shadow: inset 0 0 0 4px #FFF1C1, inset 0 0 0 7px #E3C774, 0 6px 0 rgba(20, 33, 61, 0.35);
+    padding: 22px 18px 18px;
+  }
+  .lb h2 { margin: 0 0 16px; font-size: 15px; line-height: 1.4; text-align: center; color: #F07E2A; }
+  .lb-x {
+    position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; border: 0; border-radius: 8px;
+    background: transparent; color: #14213D; font: 700 18px system-ui, sans-serif; cursor: pointer;
+  }
+  .lb ol { list-style: none; margin: 0; padding: 0; font-size: 10px; line-height: 1; }
+  .lb li {
+    display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px;
+    padding: 8px 6px; border-radius: 6px;
+  }
+  .lb li:nth-child(odd) { background: rgba(227, 199, 116, 0.35); }
+  .lb li.me { background: #FFD23F; }
+  .lb li .r { color: #F07E2A; }
+  .lb li .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lb-status { margin: 10px 0 0; min-height: 12px; font-size: 9px; line-height: 1.5; text-align: center; color: #6B5B2E; }
+  .lb form { margin-top: 14px; padding-top: 14px; border-top: 3px dashed #E3C774; }
+  .lb label { display: block; margin-bottom: 8px; font-size: 9px; color: #6B5B2E; }
+  .lb-row { display: flex; gap: 8px; }
+  .lb input {
+    flex: 1; min-width: 0; box-sizing: border-box; height: 40px; padding: 0 10px;
+    border: 3px solid #14213D; border-radius: 8px; background: #fff; color: #14213D;
+    font: 12px "Press Start 2P", system-ui, sans-serif;
+  }
+  .lb button[type="submit"] {
+    height: 40px; padding: 0 14px; border: 3px solid #14213D; border-radius: 8px; cursor: pointer;
+    background: #6CC64A; color: #fff; font: 11px "Press Start 2P", system-ui, sans-serif;
+    text-shadow: 0 2px 0 #14213D;
+  }
+  .lb button:disabled { opacity: 0.6; cursor: default; }
+  .lb-me { margin: 10px 0 0; font-size: 9px; line-height: 1.6; color: #6B5B2E; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div id="safe"></div>
 <div id="loading">Загрузка…</div>
+<div id="lb" class="lb" hidden>
+  <div class="lb-card" role="dialog" aria-modal="true" aria-labelledby="lb-title">
+    <button class="lb-x" id="lb-close" type="button" aria-label="Закрыть">✕</button>
+    <h2 id="lb-title">🏆 ТОП ИГРОКОВ</h2>
+    <ol id="lb-list"></ol>
+    <p class="lb-status" id="lb-status"></p>
+    <form id="lb-form" autocomplete="off">
+      <label for="lb-name">ТВОЁ ИМЯ В ТАБЛИЦЕ</label>
+      <div class="lb-row">
+        <input id="lb-name" maxlength="12" placeholder="Ваник" enterkeyhint="done" spellcheck="false">
+        <button type="submit" id="lb-save">ОК</button>
+      </div>
+      <p class="lb-me" id="lb-me"></p>
+    </form>
+  </div>
+</div>
 <script>
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
+  const VERSION = "1.1";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 76, pipeSpacing: 235, baseGap: 178, minGap: 148,
     birdHeight: 70, hitRadius: 22,
+    themeEvery: 20,   // смена времени суток каждые N очков
+    moveFrom: 30,     // с этого счёта трубы начинают двигаться
   };
+  // Онлайн-таблица рекордов (Firebase Realtime Database, REST)
+  const LB_DB = "https://flappy-vanik-default-rtdb.europe-west1.firebasedatabase.app";
+  const FINE_POINTER = !!(window.matchMedia && matchMedia("(hover: hover) and (pointer: fine)").matches);
   const OUTLINE = "#14213D";
   const FONT = '"Press Start 2P", "Arial Black", "Avenir Next", system-ui, sans-serif';
   const PIXEL_FONT_SCALE = 0.62; // Press Start 2P очень широкий
@@ -136,6 +203,7 @@
 
   function resize() {
     readSafe();
+    const oldU = u, oldW = W;
     const vw = window.innerWidth, vh = window.innerHeight;
     H = vh;
     W = Math.min(vw, Math.round(vh * 0.62)); // на компьютере — «телефонный» экран по центру
@@ -152,7 +220,7 @@
     groundY = H - groundTop;
     tileW = Math.ceil(W / (block * 4)) * block * 4;
     buildTextures();
-    if (game) game.onResize();
+    if (game) game.onResize(u / oldU, oldW);
   }
 
   // ---------- Пиксельная графика ----------
@@ -179,19 +247,48 @@
     "XXXSSXXXXXXSSSXXXX",
     "SSSSSSSSSSSSSSSSSS",
   ];
-  function drawCloud(g, ox, oy, b) {
+  function drawCloud(g, ox, oy, b, light = "#fff", shade = "#CDEBFB") {
     CLOUD.forEach((row, r) => [...row].forEach((ch, c) => {
-      if (ch !== ".") rect(g, ch === "X" ? "#fff" : "#CDEBFB", ox + c * b, oy + r * b, b + 0.5, b + 0.5);
+      if (ch !== ".") rect(g, ch === "X" ? light : shade, ox + c * b, oy + r * b, b + 0.5, b + 0.5);
     }));
+  }
+
+  // Время суток: день → закат → ночь. tint — затемнение дальнего плана (облака/холмы).
+  const SKIES = [
+    { top: "#2F9BEF", bottom: "#8ED6FB", cloud: "#fff", cloudShade: "#CDEBFB", tint: null },
+    { top: "#5B4B9A", mid: "#F2727F", bottom: "#FFC37A", cloud: "#FFE3D1", cloudShade: "#F7B5A8", tint: "rgba(150,50,70,0.16)" },
+    { top: "#0B1638", bottom: "#2E4A86", cloud: "#5A6E9E", cloudShade: "#43578A", tint: "rgba(10,18,52,0.48)", stars: true },
+  ];
+  function buildSky(def, b) {
+    return offscreen(W, H, (g) => {
+      for (let i = 0; i < 10; i++) {
+        const t = i / 9;
+        const col = def.mid ? (t < 0.5 ? mixHex(def.top, def.mid, t * 2) : mixHex(def.mid, def.bottom, (t - 0.5) * 2)) : mixHex(def.top, def.bottom, t);
+        rect(g, col, 0, i * H / 10, W, H / 10 + 1);
+      }
+      if (def.stars) {
+        let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+        for (let i = 0; i < 70; i++) {
+          const x = Math.floor(rnd() * W / b) * b, y = Math.floor(rnd() * H * 0.62 / b) * b, big = rnd() < 0.15;
+          rect(g, rnd() < 0.5 ? "#FFFFFF" : "#BFD4FF", x, y, big ? b : b * 0.6, big ? b : b * 0.6);
+        }
+        // пиксельная луна
+        const mr = 7, mx = W * 0.74, my = H * 0.13, mb = b * 1.1;
+        for (let yy = -mr; yy <= mr; yy++) for (let xx = -mr; xx <= mr; xx++) {
+          if (xx * xx + yy * yy > mr * mr) continue;
+          const shadow = (xx + 3) * (xx + 3) + (yy - 2) * (yy - 2) <= 7;
+          rect(g, shadow ? "#D9D2A6" : "#FFF6C9", mx + xx * mb, my + yy * mb, mb + 0.5, mb + 0.5);
+        }
+      }
+      drawCloud(g, W * 0.08, H * 0.16, b * 0.8, def.cloud, def.cloudShade);
+      drawCloud(g, W * 0.62, H * 0.26, b * 0.65, def.cloud, def.cloudShade);
+    });
   }
 
   function buildTextures() {
     const b = block;
-    tex.sky = offscreen(W, H, (g) => {
-      for (let i = 0; i < 10; i++) rect(g, mixHex("#2F9BEF", "#8ED6FB", i / 9), 0, i * H / 10, W, H / 10 + 1);
-      drawCloud(g, W * 0.08, H * 0.16, b * 0.8);
-      drawCloud(g, W * 0.62, H * 0.26, b * 0.65);
-    });
+    tex.skies = SKIES.map(def => buildSky(def, b));
+    tex.sky = tex.skies[0];
 
     const ch = Math.round(150 * u / b) * b;
     tex.clouds = offscreen(tileW, ch, (g) => {
@@ -281,6 +378,8 @@
 
   // ---------- Игра ----------
   const MEDALS = [
+    { min: 100, name: "ЛЕГЕНДА", color: "#FF6BD6" },
+    { min: 70, name: "АЛМАЗ", color: "#8C7CFF" },
     { min: 40, name: "ПЛАТИНА", color: "#A6F0FF" },
     { min: 30, name: "ЗОЛОТО", color: "#FFD23F" },
     { min: 20, name: "СЕРЕБРО", color: "#C9D1D9" },
@@ -300,19 +399,38 @@
     }
     get birdX() { return W * 0.3; }
     get birdStartY() { return groundY - (groundY) * 0.48; }
-    onResize() { if (this.state === "ready") this.bird.y = this.birdStartY; }
+    onResize(k, oldW) {
+      // тайлы пересобраны под новую ширину — прокрутка не должна выходить за tileW (иначе справа «дыра»)
+      for (const key in this.scroll) this.scroll[key] %= tileW;
+      if (this.state === "ready") { this.bird.y = this.birdStartY; return; }
+      if (!isFinite(k) || k <= 0 || !oldW) return;
+      // пересчитываем мир под новый размер экрана, чтобы трубы не «уехали»
+      const ox = oldW * 0.3, nx = this.birdX;
+      for (const p of this.pipes) { p.x = nx + (p.x - ox) * k; p.gapY *= k; p.baseY *= k; p.gap *= k; if (p.move) p.move.amp *= k; }
+      this.bird.y = Math.min(this.bird.y * k, groundY - CFG.hitRadius * u);
+      this.bird.vy *= k;
+      if (this.nextPipe) this.nextPipe *= k;
+      if (this.lastGap !== null) this.lastGap *= k;
+      this.particles = [];
+      this.pause();
+    }
 
     reset() {
       this.state = "ready";
       this.stateTime = 0;
       this.score = 0;
       this.pipes = [];
-      this.lastGap = null;
+      this.lastGap = null; this.lastAmp = 0;
       this.bird = { y: this.birdStartY, vy: 0, rot: 0, squash: 0 };
       this.flash = 0; this.shake = 0;
       this.scorePop = 0;
       this.over = null;
       this.buttons = [];
+      this.particles = [];
+      this.sky = { from: 0, to: 0, t: 1 };
+      this.playT = 0;
+      this.resumeIn = 0;
+      this.confetti = false;
     }
     setState(s) { this.state = s; this.stateTime = 0; }
 
@@ -324,20 +442,38 @@
       this.bird.vy = -CFG.flap * u;
       this.bird.squash = 1;
       Audio.play("flap");
+      this.burst(this.birdX - 20 * u, this.bird.y + 12 * u, 5, {
+        colors: ["#FFFFFF", "#E3F4FF"], vx: [-CFG.speed * 0.9, -CFG.speed * 0.35], vy: [-30, 70],
+        size: [4, 8], life: [0.3, 0.5], g: 0,
+      });
+    }
+    pause() {
+      if (this.state !== "playing") return;
+      this.setState("paused");
+      this.resumeIn = 0;
+    }
+    resume() {
+      if (this.state !== "paused" || this.resumeIn > 0) return;
+      this.resumeIn = 1.5;   // отсчёт 3-2-1
+      Audio.play("swoosh");
     }
     tap(x, y) {
       Audio.unlock();
-      if (this.muteRect && this.state !== "playing" && x >= this.muteRect.x && x <= this.muteRect.x + this.muteRect.w && y >= this.muteRect.y && y <= this.muteRect.y + this.muteRect.h) {
-        Audio.muted = !Audio.muted; store.set("muted", Audio.muted ? "1" : "0");
-        return;
+      const inR = (r) => r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+      if (this.state === "ready" || this.state === "over") {
+        if (inR(this.muteRect)) { Audio.muted = !Audio.muted; store.set("muted", Audio.muted ? "1" : "0"); return; }
+        if (inR(this.lbRect)) { Audio.play("swoosh"); LBUI.open(); return; }
       }
       switch (this.state) {
         case "ready": this.start(); this.flap(); break;
-        case "playing": this.flap(); break;
+        case "playing":
+          if (inR(this.pauseRect)) { this.pause(); return; }
+          this.flap(); break;
+        case "paused": this.resume(); break;
         case "over":
           if (this.stateTime < 0.95) return;
           for (const b of this.buttons) {
-            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) { b.pressed = 0.15; Audio.play("swoosh"); setTimeout(b.action, 120); return; }
+            if (inR(b)) { b.pressed = 0.15; Audio.play("swoosh"); setTimeout(b.action, 120); return; }
           }
           break;
       }
@@ -346,7 +482,12 @@
       Audio.unlock();
       if (this.state === "ready") { this.start(); this.flap(); }
       else if (this.state === "playing") this.flap();
+      else if (this.state === "paused") this.resume();
       else if (this.state === "over" && this.stateTime >= 0.95) { Audio.play("swoosh"); this.restart(); }
+    }
+    togglePause() {
+      if (this.state === "playing") this.pause();
+      else if (this.state === "paused") this.resume();
     }
     restart() {
       if (this.curtain) return;
@@ -359,6 +500,9 @@
       vibrate(80);
       this.flash = 1; this.shake = 0.22;
       this.bird.squash = 0;
+      this.burst(this.birdX, this.bird.y, 14, {
+        colors: ["#FFFFFF", "#FFD23F", "#FF9F1C"], speed: [80, 260], size: [4, 8], life: [0.35, 0.7], g: 500,
+      });
       if (onGround) this.finish();
       else {
         this.setState("dying");
@@ -373,6 +517,42 @@
       const medal = MEDALS.find(m => this.score >= m.min) || null;
       this.over = { isNew, medal, shownScore: 0 };
       setTimeout(() => Audio.play("swoosh"), 450);
+      const games = (parseInt(store.get("gamesPlayed", "0"), 10) || 0) + 1;
+      store.set("gamesPlayed", String(games));
+      Leaderboard.submitBest(this.best);   // отправит, только если рекорд вырос и есть имя
+    }
+
+    // ---------- Частицы ----------
+    burst(x, y, n, o) {
+      const R = (a) => a[0] + Math.random() * (a[1] - a[0]);
+      for (let i = 0; i < n; i++) {
+        let vx, vy;
+        if (o.speed) { const a = Math.random() * Math.PI * 2, s = R(o.speed); vx = Math.cos(a) * s; vy = Math.sin(a) * s; }
+        else { vx = R(o.vx); vy = R(o.vy); }
+        const life = R(o.life);
+        this.particles.push({
+          x, y, vx: vx * u, vy: vy * u, g: (o.g || 0) * u, life, max: life,
+          size: R(o.size) * u, color: o.colors[i % o.colors.length], ui: !!o.ui, spin: Math.random() * 6,
+        });
+      }
+      if (this.particles.length > 260) this.particles.splice(0, this.particles.length - 260);
+    }
+    updateParticles(dt) {
+      for (const p of this.particles) {
+        p.vy += p.g * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; p.spin += dt * 8;
+      }
+      this.particles = this.particles.filter(p => p.life > 0);
+    }
+    drawParticles(ui) {
+      for (const p of this.particles) {
+        if (p.ui !== ui) continue;
+        const a = Math.min(1, p.life / p.max * 1.6);
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.color;
+        if (ui) { const w = p.size * (0.35 + 0.65 * Math.abs(Math.sin(p.spin))); ctx.fillRect(p.x - w / 2, p.y - p.size / 2, w, p.size); }
+        else ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+      }
+      ctx.globalAlpha = 1;
     }
 
     spawnPipe() {
@@ -381,9 +561,23 @@
       const lo = safeTop + margin + gap / 2;          // y-вниз: верхняя граница
       const hi = Math.max(lo, groundY - margin - gap / 2);
       let y = lo + Math.random() * (hi - lo);
-      if (this.lastGap !== null) { const j = 210 * u; y = Math.min(Math.max(y, this.lastGap - j), this.lastGap + j); }
+      // после CFG.moveFrom часть труб «оживает» и плавно ездит вверх-вниз
+      let move = null;
+      if (this.score >= CFG.moveFrom && Math.random() < Math.min(0.6, 0.3 + (this.score - CFG.moveFrom) * 0.01)) {
+        const amp = Math.min(30 * u, (hi - lo) / 2);
+        if (amp > 6 * u) move = { amp, w: 1.2 + Math.random() * 0.5, ph: Math.random() * Math.PI * 2 };
+      }
+      if (move) y = Math.min(Math.max(y, lo + move.amp), hi - move.amp);
+      if (this.lastGap !== null) {
+        // максимальный перепад между соседними проёмами с учётом движения — чтобы всегда было проходимо
+        const j = 210 * u - (move ? move.amp : 0) - (this.lastAmp || 0);
+        y = Math.min(Math.max(y, this.lastGap - j), this.lastGap + j);
+      }
       this.lastGap = y;
-      this.pipes.push({ x: W + tex.pipe.w, gapY: y, gap, passed: false });
+      this.lastAmp = move ? move.amp : 0;
+      const p = { x: W + tex.pipe.w, gapY: y, baseY: y, gap, passed: false, move };
+      if (move) p.gapY = y + Math.sin(move.ph + this.playT * move.w) * move.amp;
+      this.pipes.push(p);
     }
 
     update(dt) {
@@ -400,8 +594,18 @@
         if (this.curtain.t >= 0.4) this.curtain = null;
       }
 
-      const dx = CFG.speed * u * dt;
       const s = this.state;
+      if (s === "paused") {
+        if (this.resumeIn > 0) {
+          this.resumeIn -= dt;
+          if (this.resumeIn <= 0) { this.resumeIn = 0; this.state = "playing"; }
+        }
+        return;   // мир заморожен
+      }
+      this.sky.t = Math.min(1, this.sky.t + dt / 1.6);
+      this.updateParticles(dt);
+
+      const dx = CFG.speed * u * dt;
       if (s === "ready" || s === "playing") {
         this.scroll.ground = (this.scroll.ground + dx) % tileW;
         this.scroll.hills = (this.scroll.hills + dx * 0.35) % tileW;
@@ -427,19 +631,36 @@
         return;
       }
       if (s === "playing") {
-        for (const p of this.pipes) p.x -= dx;
+        this.playT += dt;
+        for (const p of this.pipes) {
+          p.x -= dx;
+          if (p.move) p.gapY = p.baseY + Math.sin(p.move.ph + this.playT * p.move.w) * p.move.amp;
+        }
         this.pipes = this.pipes.filter(p => p.x > -tex.pipe.w);
         this.nextPipe -= dx;
         if (this.nextPipe <= 0) { this.spawnPipe(); this.nextPipe += CFG.pipeSpacing * u; }
         for (const p of this.pipes) {
-          if (!p.passed && p.x < this.birdX) { p.passed = true; this.score++; this.scorePop = 1; Audio.play("point"); }
+          if (!p.passed && p.x < this.birdX) { p.passed = true; this.onPoint(); }
         }
         this.collide();
       }
       if (s === "over" && this.over) {
         const t = this.stateTime - 0.65;
         this.over.shownScore = Math.round(this.score * Math.min(1, Math.max(0, t / 0.5)));
+        if (this.over.isNew && !this.confetti && t > 1.1) {
+          this.confetti = true;
+          const colors = ["#FFD23F", "#E63946", "#6CC64A", "#2F9BEF", "#FF6BD6", "#FFFFFF"];
+          this.burst(W * 0.5, safeTop + 10 * u, 70, { colors, vx: [-170, 170], vy: [-60, 160], size: [6, 10], life: [1.8, 2.8], g: 260, ui: true });
+        }
       }
+    }
+
+    onPoint() {
+      this.score++; this.scorePop = 1; Audio.play("point");
+      this.burst(this.birdX + 6 * u, this.bird.y, 7, { colors: ["#FFD23F", "#FFFFFF"], speed: [60, 170], size: [3, 6], life: [0.3, 0.55], g: 200 });
+      const theme = Math.floor(this.score / CFG.themeEvery) % SKIES.length;
+      if (theme !== this.sky.to) this.sky = { from: this.sky.to, to: theme, t: 0 };
+      if (this.score === CFG.moveFrom) toast("ТРУБЫ ОЖИЛИ!");
     }
 
     collide() {
@@ -473,9 +694,20 @@
         const m = 7 * u * (this.shake / 0.22);
         ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
       }
-      ctx.drawImage(tex.sky, 0, 0, W, H);
+      const sk = this.sky, st = easeOut(sk.t);
+      ctx.drawImage(tex.skies[sk.from], 0, 0, W, H);
+      if (sk.to !== sk.from && st > 0) {
+        ctx.globalAlpha = st; ctx.drawImage(tex.skies[sk.to], 0, 0, W, H); ctx.globalAlpha = 1;
+      }
       this.drawTiles(tex.clouds, this.scroll.clouds, groundY - tex.clouds.h);
       this.drawTiles(tex.hills, this.scroll.hills, groundY - tex.hills.h + block);
+      // затемнение дальнего плана под время суток
+      const farTop = groundY - tex.clouds.h;
+      for (const [idx, a] of [[sk.from, 1 - (sk.to !== sk.from ? st : 0)], [sk.to, sk.to !== sk.from ? st : 0]]) {
+        const tint = SKIES[idx].tint;
+        if (!tint || a <= 0) continue;
+        ctx.globalAlpha = a; ctx.fillStyle = tint; ctx.fillRect(0, farTop, W, groundY - farTop + block); ctx.globalAlpha = 1;
+      }
 
       const pw = tex.pipe.w;
       for (const p of this.pipes) {
@@ -487,10 +719,12 @@
         ctx.restore();
       }
       this.drawTiles(tex.ground, this.scroll.ground, groundY);
+      this.drawParticles(false);
       this.drawBird();
       ctx.restore();
 
       this.drawUI();
+      this.drawParticles(true);
 
       if (this.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${this.flash * 0.9})`; ctx.fillRect(0, 0, W, H); }
       if (this.curtain) {
@@ -535,6 +769,33 @@
       ctx.restore();
     }
 
+    // кнопка-кубок слева сверху (открывает таблицу рекордов)
+    drawTrophy() {
+      const s = 34 * u, x = 12 * u, y = safeTop + 12 * u;
+      this.lbRect = { x: x - 8 * u, y: y - 8 * u, w: s + 16 * u, h: s + 16 * u };
+      roundRect(x, y, s, s, 8 * u, "rgba(20,33,61,0.35)");
+      const k = s / 34;
+      ctx.save();
+      ctx.translate(x + s / 2, y + s / 2);
+      ctx.fillStyle = "#FFD23F"; ctx.strokeStyle = "#FFD23F"; ctx.lineWidth = 2.5 * k;
+      ctx.beginPath();                       // чаша
+      ctx.moveTo(-8 * k, -10 * k); ctx.lineTo(8 * k, -10 * k); ctx.lineTo(7 * k, -1 * k);
+      ctx.quadraticCurveTo(0, 6 * k, -7 * k, -1 * k); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(-9 * k, -5 * k, 4 * k, Math.PI * 0.5, Math.PI * 1.5); ctx.stroke();   // ручки
+      ctx.beginPath(); ctx.arc(9 * k, -5 * k, 4 * k, -Math.PI * 0.5, Math.PI * 0.5); ctx.stroke();
+      ctx.fillRect(-2 * k, 2 * k, 4 * k, 5 * k);   // ножка
+      ctx.fillRect(-7 * k, 7 * k, 14 * k, 4 * k);  // подставка
+      ctx.restore();
+    }
+    drawPauseButton() {
+      const s = 34 * u, x = 12 * u, y = safeTop + 12 * u;
+      this.pauseRect = { x: x - 8 * u, y: y - 8 * u, w: s + 16 * u, h: s + 16 * u };
+      roundRect(x, y, s, s, 8 * u, "rgba(20,33,61,0.35)");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(x + s * 0.3, y + s * 0.26, s * 0.14, s * 0.48);
+      ctx.fillRect(x + s * 0.56, y + s * 0.26, s * 0.14, s * 0.48);
+    }
+
     drawUI() {
       const s = this.state;
       if (s === "ready") {
@@ -546,24 +807,55 @@
           ctx.drawImage(this.title, (W - tw) / 2, safeTop + 40 * u + Math.sin(this.t * 3.5) * 6 * u, tw, th);
         }
         const pulse = 1 + 0.06 * Math.sin(this.t * 6);
-        ctx.font = `${40 * u}px system-ui`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText("👆", W / 2, groundY - 120 * u + Math.sin(this.t * 9) * 6 * u);
+        if (FINE_POINTER) {
+          // пиксельная клавиша «пробел», которая сама себя нажимает
+          const press = Math.max(0, Math.sin(this.t * 5)) ** 3, kw = 120 * u, kh = 30 * u, kx = W / 2 - kw / 2, ky = groundY - 135 * u + press * 5 * u;
+          if (press < 0.9) roundRect(kx, ky + 7 * u - press * 5 * u, kw, kh, 7 * u, OUTLINE);
+          roundRect(kx, ky, kw, kh, 7 * u, "#FFFFFF", OUTLINE, 3.5 * u);
+          roundRect(kx + 8 * u, ky + 6 * u, kw - 16 * u, 5 * u, 2.5 * u, "#D9E8F5");
+        } else {
+          ctx.font = `${40 * u}px system-ui`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+          ctx.fillText("👆", W / 2, groundY - 120 * u + Math.sin(this.t * 9) * 6 * u);
+        }
         ctx.save(); ctx.translate(W / 2, groundY - 70 * u); ctx.scale(pulse, pulse);
-        text("ТАПНИ, ЧТОБЫ ЛЕТЕТЬ!", 0, 0, 22 * u, "#FFD23F");
+        text(FINE_POINTER ? "ЖМИ ПРОБЕЛ ИЛИ КЛИК" : "ТАПНИ, ЧТОБЫ ЛЕТЕТЬ!", 0, 0, 22 * u, "#FFD23F");
         ctx.restore();
         if (this.best > 0) text(`РЕКОРД: ${this.best}`, W / 2, groundY - 34 * u, 20 * u);
+        text(`v${VERSION}`, W - 10 * u, H - safeBottom - 12 * u, 10 * u, "#fff", { align: "right", alpha: 0.75, stroke: 2 * u });
         ctx.restore();
         this.drawMute();
-      } else if (s === "playing" || s === "dying") {
+        this.drawTrophy();
+      } else if (s === "playing" || s === "dying" || s === "paused") {
         const pop = 1 + 0.25 * Math.sin(this.scorePop * Math.PI);
         ctx.save();
         ctx.translate(W / 2, safeTop + 60 * u);
         ctx.scale(pop, pop);
         text(String(this.score), 0, 0, 56 * u, "#fff", { alpha: s === "dying" ? Math.max(0, 1 - this.stateTime * 4) : 1 });
         ctx.restore();
+        if (s === "playing") this.drawPauseButton();
+        if (s === "paused") this.drawPaused();
       } else if (s === "over") {
         this.drawGameOver();
         this.drawMute();
+        this.drawTrophy();
+      }
+    }
+
+    drawPaused() {
+      ctx.fillStyle = "rgba(20,33,61,0.45)";
+      ctx.fillRect(0, 0, W, H);
+      const cy = groundY * 0.45 + safeTop * 0.5;
+      if (this.resumeIn > 0) {
+        const n = Math.ceil(this.resumeIn / 0.5), f = (this.resumeIn % 0.5) / 0.5;
+        ctx.save(); ctx.translate(W / 2, cy); const sc = 1 + 0.35 * f; ctx.scale(sc, sc);
+        text(String(n), 0, 0, 90 * u, "#FFD23F", { alpha: Math.min(1, 0.4 + f) });
+        ctx.restore();
+      } else {
+        text("ПАУЗА", W / 2, cy - 20 * u, 44 * u, "#FFD23F");
+        const pulse = 1 + 0.05 * Math.sin(this.t * 6);
+        ctx.save(); ctx.translate(W / 2, cy + 40 * u); ctx.scale(pulse, pulse);
+        text(FINE_POINTER ? "ПРОБЕЛ — ПРОДОЛЖИТЬ" : "ТАПНИ, ЧТОБЫ ПРОДОЛЖИТЬ", 0, 0, 17 * u, "#fff");
+        ctx.restore();
       }
     }
 
@@ -633,19 +925,25 @@
         this.buttons = [
           { label: "ЗАНОВО", color: "#6CC64A", action: () => this.restart() },
           { label: "ПОДЕЛИТЬСЯ", color: "#FFB627", action: () => share(this.score) },
+          { label: "ТОП ИГРОКОВ", color: "#4EA8DE", action: () => LBUI.open() },
         ];
       }
       this.buttons.forEach((b, i) => {
-        b.w = bw; b.h = bh;
-        b.x = i === 0 ? W / 2 - bw - 8 * u : W / 2 + 8 * u;
-        b.y = by;
+        if (i < 2) {
+          b.w = bw; b.h = bh;
+          b.x = i === 0 ? W / 2 - bw - 8 * u : W / 2 + 8 * u;
+          b.y = by;
+        } else {
+          b.w = bw * 2 + 16 * u; b.h = 44 * u;
+          b.x = W / 2 - b.w / 2; b.y = by + bh + 12 * u;
+        }
         if (ba <= 0) return;
         const sc = b.pressed ? 0.92 : 1;
         ctx.save();
         ctx.globalAlpha = ba;
-        ctx.translate(b.x + bw / 2, b.y + bh / 2); ctx.scale(sc, sc);
-        roundRect(-bw / 2, -bh / 2, bw, bh, 10 * u, b.color, OUTLINE, 4 * u);
-        roundRect(-bw / 2 + 8 * u, -bh / 2 + 7 * u, bw - 16 * u, 6 * u, 3 * u, "rgba(255,255,255,0.45)");
+        ctx.translate(b.x + b.w / 2, b.y + b.h / 2); ctx.scale(sc, sc);
+        roundRect(-b.w / 2, -b.h / 2, b.w, b.h, 10 * u, b.color, OUTLINE, 4 * u);
+        roundRect(-b.w / 2 + 8 * u, -b.h / 2 + 7 * u, b.w - 16 * u, 6 * u, 3 * u, "rgba(255,255,255,0.45)");
         text(b.label, 0, 2 * u, (b.label.length > 7 ? 15 : 19) * u, "#fff", { stroke: 3 * u });
         ctx.restore();
       });
@@ -662,23 +960,167 @@
     } catch {}
   }
   let toastState = null;
-  function toast(msg) { toastState = { msg, t: 0 }; }
+  function toast(msg, dur = 2.5) { toastState = { msg, t: 0, dur }; }
+
+  // ---------- Онлайн-таблица рекордов ----------
+  const Leaderboard = {
+    id: store.get("playerId", ""),
+    name: store.get("playerName", ""),
+    sent: parseInt(store.get("lbSent", "0"), 10) || 0,   // какой рекорд уже в таблице
+    busy: null,
+    init() {
+      if (!/^[a-z0-9]{12}$/.test(this.id)) {
+        this.id = Array.from({ length: 12 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[Math.floor(Math.random() * 36)]).join("");
+        store.set("playerId", this.id);
+      }
+    },
+    cleanName(s) { return String(s || "").replace(/[\u0000-\u001f\u007f<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 12); },
+    clean(list) {
+      if (!Array.isArray(list)) return [];
+      const seen = new Set(), out = [];
+      for (const e of list) {
+        if (!e || typeof e.id !== "string" || seen.has(e.id)) continue;
+        const s = Math.floor(Number(e.s)), n = this.cleanName(e.n);
+        if (!n || !(s > 0 && s < 100000)) continue;
+        seen.add(e.id); out.push({ id: e.id.slice(0, 16), n, s, t: Number(e.t) || 0 });
+      }
+      return out.sort((a, b) => b.s - a.s || a.t - b.t);
+    },
+    async request(method, path, body) {
+      const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 9000);
+      try {
+        const res = await fetch(LB_DB + path, {
+          method, cache: "no-store", signal: ctrl.signal,
+          headers: body ? { "Content-Type": "application/json" } : {},
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        if (!res.ok) { const err = new Error("HTTP " + res.status); err.status = res.status; throw err; }
+        return res.json();
+      } finally { clearTimeout(timer); }
+    },
+    async load() {
+      const d = await this.request("GET", '/scores.json?orderBy=%22s%22&limitToLast=100');
+      return this.clean(Object.entries(d || {}).map(([id, e]) => ({ id, ...e })));
+    },
+    // Каждый игрок пишет только свою строку. Правила базы не дают понизить рекорд или удалить запись.
+    async submit(score) {
+      const path = `/scores/${this.id}.json`;
+      try {
+        await this.request("PUT", path, { n: this.name, s: score, t: Date.now() });
+      } catch (e) {
+        if (e.status !== 401 && e.status !== 403) throw e;
+        // в таблице уже рекорд выше — просто обновляем имя
+        const cur = await this.request("GET", path);
+        if (!cur || !(cur.s >= score)) throw e;
+        if (cur.n !== this.name) await this.request("PUT", path, { n: this.name, s: cur.s, t: Date.now() });
+        score = cur.s;
+      }
+      this.markSent(score);
+      return this.load();
+    },
+    markSent(s) { this.sent = Math.max(this.sent, s); store.set("lbSent", String(this.sent)); },
+    submitBest(best) {
+      if (!this.name || !(best > this.sent) || this.busy) return this.busy;
+      this.busy = this.submit(best).catch(() => null).finally(() => { this.busy = null; });
+      return this.busy;
+    },
+  };
+  Leaderboard.init();
+
+  const LBUI = {
+    el: document.getElementById("lb"),
+    list: document.getElementById("lb-list"),
+    status: document.getElementById("lb-status"),
+    form: document.getElementById("lb-form"),
+    input: document.getElementById("lb-name"),
+    save: document.getElementById("lb-save"),
+    me: document.getElementById("lb-me"),
+    get isOpen() { return !this.el.hidden; },
+    init() {
+      document.getElementById("lb-close").addEventListener("click", () => this.close());
+      this.el.addEventListener("pointerdown", (e) => { if (e.target === this.el) this.close(); });
+      this.form.addEventListener("submit", (e) => { e.preventDefault(); this.saveName(); });
+    },
+    open() {
+      if (game) game.pause();
+      this.el.hidden = false;
+      this.input.value = Leaderboard.name;
+      this.renderMe();
+      this.refresh();
+      if (!Leaderboard.name && FINE_POINTER) setTimeout(() => this.input.focus(), 50);
+    },
+    close() {
+      this.el.hidden = true;
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    },
+    renderMe() {
+      const best = game ? game.best : 0;
+      this.me.textContent = Leaderboard.name
+        ? `ТВОЙ РЕКОРД: ${best}. В ТАБЛИЦЕ КАК «${Leaderboard.name}».`
+        : best > 0 ? `ВВЕДИ ИМЯ, ЧТОБЫ ПОПАСТЬ В ТОП С РЕКОРДОМ ${best}.` : "СЫГРАЙ И ВВЕДИ ИМЯ, ЧТОБЫ ПОПАСТЬ В ТОП.";
+      this.save.textContent = Leaderboard.name ? "ОК" : "В ТОП";
+    },
+    render(list) {
+      this.list.textContent = "";
+      const top = list.slice(0, 10);
+      top.forEach((e, i) => this.list.appendChild(this.row(i + 1, e)));
+      const myIdx = list.findIndex(e => e.id === Leaderboard.id);
+      if (myIdx >= 10) this.list.appendChild(this.row(myIdx + 1, list[myIdx]));
+      this.status.textContent = list.length ? "" : "ПОКА ПУСТО — СТАНЬ ПЕРВЫМ!";
+    },
+    row(rank, e) {
+      const li = document.createElement("li");
+      if (e.id === Leaderboard.id) li.className = "me";
+      const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : String(rank);
+      for (const [cls, txt] of [["r", medal], ["n", e.n], ["s", String(e.s)]]) {
+        const span = document.createElement("span"); span.className = cls; span.textContent = txt; li.appendChild(span);
+      }
+      return li;
+    },
+    async refresh() {
+      this.status.textContent = "ЗАГРУЗКА…";
+      try {
+        if (Leaderboard.busy) await Leaderboard.busy;
+        this.render(await Leaderboard.load());
+      } catch {
+        this.list.textContent = "";
+        this.status.textContent = "НЕТ СВЯЗИ С ТАБЛИЦЕЙ. ПОПРОБУЙ ПОЗЖЕ.";
+      }
+    },
+    async saveName() {
+      const name = Leaderboard.cleanName(this.input.value);
+      if (!name) { this.input.focus(); return; }
+      Leaderboard.name = name; store.set("playerName", name);
+      this.renderMe();
+      const best = game ? game.best : 0;
+      if (best <= 0) { this.status.textContent = "ИМЯ СОХРАНЕНО. ТЕПЕРЬ СЫГРАЙ!"; return; }
+      this.save.disabled = true; this.status.textContent = "ОТПРАВЛЯЮ…";
+      try { this.render(await Leaderboard.submit(best)); }
+      catch { this.status.textContent = "НЕ ВЫШЛО ОТПРАВИТЬ. ПОПРОБУЙ ЕЩЁ РАЗ."; }
+      finally { this.save.disabled = false; }
+    },
+  };
+  LBUI.init();
 
   // ---------- Ввод ----------
   function pointer(e) {
     e.preventDefault();
-    if (!game) return;
+    if (!game || LBUI.isOpen) return;
     const r = canvas.getBoundingClientRect();
     game.tap(e.clientX - r.left, e.clientY - r.top);
   }
   canvas.addEventListener("pointerdown", pointer, { passive: false });
   document.addEventListener("keydown", (e) => {
-    if (e.repeat) return;
-    if (e.code === "Space" || e.code === "ArrowUp" || e.code === "Enter") { e.preventDefault(); game && game.key(); }
+    if (LBUI.isOpen) { if (e.code === "Escape") LBUI.close(); return; }   // не мешаем вводить имя
+    if (e.repeat || !game) return;
+    if (e.code === "Space" || e.code === "ArrowUp" || e.code === "Enter") { e.preventDefault(); game.key(); }
+    else if (e.code === "KeyP" || e.code === "Escape") { e.preventDefault(); game.togglePause(); }
   });
   ["touchstart", "touchmove", "gesturestart", "dblclick"].forEach(ev =>
-    document.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
-  document.addEventListener("visibilitychange", () => { last = performance.now(); });
+    document.addEventListener(ev, (e) => { if (!LBUI.isOpen) e.preventDefault(); }, { passive: false }));
+  // автопауза, когда игру свернули или переключили вкладку/окно
+  document.addEventListener("visibilitychange", () => { last = performance.now(); if (document.hidden && game) game.pause(); });
+  window.addEventListener("blur", () => { if (game) game.pause(); });
 
   // ---------- Цикл ----------
   let last = performance.now();
@@ -689,10 +1131,11 @@
       game.update(dt);
       game.draw();
       if (toastState) {
-        toastState.t += dt;
-        const a = toastState.t < 0.2 ? toastState.t / 0.2 : toastState.t > 2.2 ? Math.max(0, 1 - (toastState.t - 2.2) / 0.3) : 1;
-        text(toastState.msg, W / 2, groundY + groundTop / 2, 15 * u, "#fff", { alpha: a });
-        if (toastState.t > 2.5) toastState = null;
+        const T = toastState;
+        if (game.state !== "paused") T.t += dt;
+        const a = T.t < 0.2 ? T.t / 0.2 : T.t > T.dur - 0.3 ? Math.max(0, 1 - (T.t - (T.dur - 0.3)) / 0.3) : 1;
+        text(T.msg, W / 2, groundY + groundTop / 2, 15 * u, "#fff", { alpha: a });
+        if (T.t > T.dur) toastState = null;
       }
     }
     requestAnimationFrame(frame);
@@ -711,12 +1154,17 @@
     game = new Game({ vanik, title });
     if (location.hash === "#debug") window.__game = game;
     document.getElementById("loading").remove();
+    // «что нового» — один раз для тех, кто уже играл в прошлую версию
+    if (store.get("seenVersion", "") !== VERSION) {
+      if (game.best > 0) toast("НОВОЕ: НОЧЬ, ТОП, ПАУЗА!", 4);
+      store.set("seenVersion", VERSION);
+    }
     requestAnimationFrame(frame);
   }
   boot();
 
   if ("serviceWorker" in navigator && location.protocol === "https:") {
-    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {}));
   }
 })();
 </script>
