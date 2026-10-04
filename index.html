@@ -81,6 +81,24 @@
   }
   .lb button:disabled { opacity: 0.6; cursor: default; }
   .lb-me { margin: 10px 0 0; font-size: 9px; line-height: 1.6; color: #6B5B2E; }
+  /* ---------- Громкость ---------- */
+  .vol-card { width: min(300px, 100%); }
+  .vol-row { display: flex; justify-content: space-between; align-items: center; margin: 18px 0 10px; font-size: 11px; }
+  .vol-row output { color: #F07E2A; min-width: 3ch; text-align: right; }
+  .lb input[type="range"] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 18px; margin: 0; padding: 0;
+    border: 3px solid #14213D; border-radius: 9px; box-sizing: border-box; cursor: pointer;
+    background: linear-gradient(#FFD23F, #FFD23F) 0 0 / var(--p, 50%) 100% no-repeat, #fff;
+  }
+  .lb input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 28px; height: 28px;
+    background: #6CC64A; border: 3px solid #14213D; border-radius: 7px; box-shadow: 0 3px 0 rgba(20, 33, 61, 0.35);
+  }
+  .lb input[type="range"]::-moz-range-thumb {
+    width: 22px; height: 22px; background: #6CC64A; border: 3px solid #14213D; border-radius: 7px;
+  }
+  .lb input[type="range"]:focus-visible { outline: 3px solid #4EA8DE; outline-offset: 3px; }
+  .vol-hint { margin: 16px 0 0; font-size: 8px; line-height: 1.6; color: #6B5B2E; text-align: center; }
 </style>
 </head>
 <body>
@@ -103,15 +121,27 @@
     </form>
   </div>
 </div>
+<div id="vol" class="lb" hidden>
+  <div class="lb-card vol-card" role="dialog" aria-modal="true" aria-labelledby="vol-title">
+    <button class="lb-x" id="vol-close" type="button" aria-label="Закрыть">✕</button>
+    <h2 id="vol-title">ГРОМКОСТЬ</h2>
+    <div class="vol-row"><label for="vol-music">🎵 МУЗЫКА</label><output id="vol-music-v" for="vol-music">60</output></div>
+    <input type="range" id="vol-music" min="0" max="100" step="1" value="60">
+    <div class="vol-row"><label for="vol-sfx">🔔 ЗВУКИ</label><output id="vol-sfx-v" for="vol-sfx">85</output></div>
+    <input type="range" id="vol-sfx" min="0" max="100" step="1" value="85">
+    <p class="vol-hint">НА КОМПЬЮТЕРЕ: M — ВЫКЛ/ВКЛ ЗВУК</p>
+  </div>
+</div>
 <script>
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.1";
+  const VERSION = "1.2";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 76, pipeSpacing: 235, baseGap: 178, minGap: 148,
     birdHeight: 70, hitRadius: 22,
+    regionEvery: 10,  // смена региона (фона) каждые N труб
     themeEvery: 20,   // смена времени суток каждые N очков
     moveFrom: 30,     // с этого счёта трубы начинают двигаться
   };
@@ -123,7 +153,7 @@
   const PIXEL_FONT_SCALE = 0.62; // Press Start 2P очень широкий
 
   const canvas = document.getElementById("game");
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { alpha: false });   // непрозрачный холст — быстрее композитинг
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch {} },
@@ -133,17 +163,44 @@
   const img = (src) => new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = src; });
 
   // ---------- Звук (синтез через WebAudio) ----------
+  // громкость 0..1; старый флаг «muted» из v1.1 превращаем в нулевую громкость
+  const readVol = (k, d) => { const v = parseFloat(store.get(k, "")); return isFinite(v) ? Math.min(1, Math.max(0, v)) : d; };
+  const wasMuted = store.get("muted", "0") === "1";
   const Audio = {
-    ctx: null, buffers: {}, muted: store.get("muted", "0") === "1",
+    ctx: null, buffers: {}, unlocked: false,
+    vol: { music: readVol("volMusic", wasMuted ? 0 : 0.6), sfx: readVol("volSfx", wasMuted ? 0 : 0.85) },
     unlock() {
       if (!this.ctx) {
         const AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
         this.ctx = new AC();
+        // микшер: эффекты и музыка → компрессор → колонки
+        this.master = this.ctx.createDynamicsCompressor();
+        this.master.threshold.value = -10; this.master.ratio.value = 4;
+        this.master.connect(this.ctx.destination);
+        this.sfxGain = this.ctx.createGain(); this.sfxGain.connect(this.master);
+        this.musicGain = this.ctx.createGain(); this.musicGain.connect(this.master);
+        this.musicBus = this.ctx.createGain(); this.musicBus.connect(this.musicGain);   // «приглушение» в меню/паузе
+        this.applyVolume();
         this.build();
+        Music.init();
       }
-      if (this.ctx.state === "suspended") this.ctx.resume();
+      this.unlocked = true;
+      if (this.ctx.state === "suspended" && !document.hidden) this.ctx.resume();
+      Music.start();
     },
+    setVolume(kind, v) {
+      this.vol[kind] = Math.min(1, Math.max(0, v));
+      store.set(kind === "music" ? "volMusic" : "volSfx", this.vol[kind].toFixed(2));
+      this.applyVolume();
+    },
+    applyVolume() {
+      if (!this.ctx) return;
+      const t = this.ctx.currentTime;
+      this.sfxGain.gain.setTargetAtTime(this.vol.sfx * this.vol.sfx, t, 0.02);          // квадрат — ближе к слуху
+      this.musicGain.gain.setTargetAtTime(this.vol.music * this.vol.music * 1.1, t, 0.02);
+    },
+    get level() { return Math.max(this.vol.music, this.vol.sfx); },
     build() {
       const sr = this.ctx.sampleRate;
       const make = (dur, fn) => {
@@ -181,17 +238,107 @@
       });
     },
     play(name) {
-      if (this.muted || !this.ctx || !this.buffers[name]) return;
+      if (this.vol.sfx <= 0 || !this.ctx || !this.buffers[name]) return;
       const s = this.ctx.createBufferSource();
       s.buffer = this.buffers[name];
-      s.connect(this.ctx.destination);
+      s.connect(this.sfxGain);
       s.start();
+    },
+  };
+
+  // ---------- Фоновая музыка: свой чиптюн-луп (Am – F – C – G), 8 тактов ----------
+  const Music = {
+    bpm: 140, step: 0, next: 0, timer: null, energy: 0, noise: null,
+    // мелодия: [позиция 16-й в такте, MIDI-нота, длина в 16-х]
+    LEAD: [
+      [[0, 76, 2], [2, 81, 2], [4, 79, 1], [5, 76, 1], [6, 74, 2], [8, 76, 4], [12, 72, 2], [14, 74, 2]],
+      [[0, 72, 2], [2, 77, 2], [4, 76, 1], [5, 72, 1], [6, 69, 2], [8, 72, 4], [12, 69, 2], [14, 72, 2]],
+      [[0, 67, 2], [2, 72, 2], [4, 76, 2], [6, 79, 2], [8, 76, 2], [10, 72, 2], [12, 74, 2], [14, 76, 2]],
+      [[0, 74, 2], [2, 71, 2], [4, 67, 2], [6, 71, 2], [8, 74, 6]],
+      [[0, 81, 3], [3, 79, 1], [4, 76, 2], [6, 79, 2], [8, 81, 2], [10, 84, 2], [12, 83, 2], [14, 79, 2]],
+      [[0, 81, 3], [3, 79, 1], [4, 77, 2], [6, 76, 2], [8, 77, 2], [10, 81, 2], [12, 79, 2], [14, 77, 2]],
+      [[0, 76, 2], [2, 79, 2], [4, 84, 4], [8, 83, 2], [10, 79, 2], [12, 76, 2], [14, 79, 2]],
+      [[0, 83, 2], [2, 81, 2], [4, 79, 2], [6, 74, 2], [8, 79, 4], [12, 71, 2], [14, 74, 2]],
+    ],
+    CHORDS: [[45, [57, 60, 64, 69]], [41, [53, 57, 60, 65]], [48, [55, 60, 64, 67]], [43, [55, 59, 62, 67]]],
+    freq: (m) => 440 * Math.pow(2, (m - 69) / 12),
+    init() {
+      const c = Audio.ctx, n = Math.floor(c.sampleRate * 0.5);
+      this.noise = c.createBuffer(1, n, c.sampleRate);
+      const d = this.noise.getChannelData(0);
+      let s = 7; for (let i = 0; i < n; i++) { s = (s * 16807) % 2147483647; d[i] = s / 2147483647 * 2 - 1; }
+    },
+    start() {
+      if (this.timer || !Audio.ctx) return;
+      this.next = Audio.ctx.currentTime + 0.1;
+      this.timer = setInterval(() => this.tick(), 25);
+    },
+    // плотность аранжировки и приглушение — по состоянию игры
+    setMood(state) {
+      if (!Audio.ctx) return;
+      const playing = state === "playing" || state === "dying";
+      this.energy = playing ? 1 : 0;
+      const duck = state === "paused" ? 0.35 : state === "over" ? 0.5 : playing ? 1 : 0.75;
+      if (duck !== this.duck) { this.duck = duck; Audio.musicBus.gain.setTargetAtTime(duck, Audio.ctx.currentTime, 0.25); }
+    },
+    tick() {
+      const c = Audio.ctx;
+      if (!c || c.state !== "running") return;
+      const sp = 60 / this.bpm / 4;
+      if (this.next < c.currentTime) this.next = c.currentTime + 0.03;   // после сна вкладки не «догоняем»
+      while (this.next < c.currentTime + 0.15) {
+        if (Audio.vol.music > 0) this.playStep(this.step, this.next, sp);
+        this.next += sp; this.step = (this.step + 1) % 128;
+      }
+    },
+    osc(type, f, t, dur, vol, slide) {
+      const c = Audio.ctx, o = c.createOscillator(), g = c.createGain();
+      o.type = type; o.frequency.setValueAtTime(f, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(Audio.musicBus);
+      o.start(t); o.stop(t + dur + 0.02);
+    },
+    hiss(t, dur, vol, type, f) {
+      const c = Audio.ctx, s = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain();
+      s.buffer = this.noise; fl.type = type; fl.frequency.value = f;
+      g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      s.connect(fl); fl.connect(g); g.connect(Audio.musicBus);
+      s.start(t, Math.random() * 0.3); s.stop(t + dur + 0.02);
+    },
+    playStep(step, t, sp) {
+      const bar = step >> 4, pos = step & 15, [root, chord] = this.CHORDS[bar & 3], hot = this.energy > 0;
+      // бас: восьмые с октавными скачками
+      if (!(pos & 1)) {
+        const oct = pos === 4 || pos === 10 || pos === 14;
+        this.osc("triangle", this.freq(root + (oct ? 12 : 0)), t, sp * 1.7, 0.42);
+        this.osc("square", this.freq(root + (oct ? 12 : 0)), t, sp * 1.2, 0.035);
+      }
+      // арпеджио шестнадцатыми
+      const arp = [0, 1, 2, 3, 2, 1, 2, 3][pos & 7];
+      this.osc("square", this.freq(chord[arp] + (hot && bar >= 4 ? 12 : 0)), t, sp * 0.8, hot ? 0.045 : 0.035);
+      // хэт
+      if (!(pos & 1) || (hot && bar >= 4)) this.hiss(t, 0.035, (pos & 3) === 2 ? 0.12 : 0.07, "highpass", 7500);
+      if (!hot) return;
+      // бочка и малый
+      if (pos === 0 || pos === 8 || (pos === 11 && (bar & 1)) || (pos === 6 && bar === 7)) this.osc("sine", 150, t, 0.16, 0.85, 42);
+      if (pos === 4 || pos === 12) { this.hiss(t, 0.12, 0.32, "bandpass", 1900); this.osc("triangle", 190, t, 0.07, 0.22); }
+      if (bar === 7 && pos >= 12) this.hiss(t, 0.06, 0.18, "bandpass", 2600);   // сбивка перед повтором
+      // мелодия
+      for (const [p, n, len] of this.LEAD[bar]) {
+        if (p !== pos) continue;
+        this.osc("square", this.freq(n), t, len * sp * 0.92, 0.075);
+        this.osc("triangle", this.freq(n + 12), t, len * sp * 0.6, 0.03);
+      }
     },
   };
   const vibrate = (ms) => { if (navigator.vibrate) try { navigator.vibrate(ms); } catch {} };
 
   // ---------- Размеры ----------
-  let W = 0, H = 0, dpr = 1, u = 1, block = 4, groundTop = 100, groundY = 0, tileW = 0;
+  let W = 0, H = 0, dpr = 1, u = 1, block = 4, groundTop = 100, groundY = 0, tileW = 0, renderScale = 1;
+  const textCache = new Map();
   let safeTop = 0, safeBottom = 0;
   let tex = {};
 
@@ -207,7 +354,9 @@
     const vw = window.innerWidth, vh = window.innerHeight;
     H = vh;
     W = Math.min(vw, Math.round(vh * 0.62)); // на компьютере — «телефонный» экран по центру
-    dpr = Math.min(window.devicePixelRatio || 1, 3);
+    // renderScale < 1 включается автоматически, если устройство не тянет 60 FPS
+    dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3) * renderScale);
+    textCache.clear(); tintCache.clear();
     canvas.style.width = W + "px"; canvas.style.height = H + "px";
     canvas.style.left = Math.round((vw - W) / 2) + "px"; canvas.style.top = "0px";
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
@@ -285,6 +434,236 @@
     });
   }
 
+  // ---------- Регионы: пиксельные панорамы (дальний и ближний план) ----------
+  const REGIONS = [
+    { name: "ЗЕЛЁНАЯ ДОЛИНА", clouds: true },
+    { name: "МОСКВА", clouds: false },
+    { name: "САНТОРИНИ", clouds: false },
+    { name: "ЕРЕВАН", clouds: true },
+  ];
+  const seeded = (s) => () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  // Затемнённые под закат/ночь копии слоёв: строятся один раз при смене времени суток, а не каждый кадр
+  const tintCache = new Map();
+  let texSeq = 0;
+  function tinted(c, tint) {
+    if (!tint || !c) return c;
+    if (!c.__id) c.__id = ++texSeq;
+    const key = c.__id + "|" + tint;
+    let t = tintCache.get(key);
+    if (t) { tintCache.delete(key); tintCache.set(key, t); return t; }
+    t = offscreen(c.w, c.h, (g) => {
+      g.drawImage(c, 0, 0, c.w, c.h);
+      g.globalCompositeOperation = "source-atop"; g.fillStyle = tint; g.fillRect(0, 0, c.w, c.h);
+    });
+    tintCache.set(key, t);
+    while (tintCache.size > 12) tintCache.delete(tintCache.keys().next().value);
+    return t;
+  }
+  // слой рисуется «клетками» размером b — так всё остаётся пиксель-артом
+  function cellLayer(cw, hc, b, paint) {
+    return offscreen(cw * b, hc * b, (g) => {
+      const R = (c, x, y, w = 1, h = 1) => { if (w > 0 && h > 0) { g.fillStyle = c; g.fillRect(x * b, y * b, w * b + 0.5, h * b + 0.5); } };
+      paint(R, cw, hc);
+    });
+  }
+
+  function paintMoscowFar(R, cw, hc) {
+    const A = "#89AACB", B = "#7898BD", WIN = "#AFC8E0", rnd = seeded(11);
+    for (let x = 0; x < cw;) {
+      const w = 5 + Math.floor(rnd() * 7), h = 6 + Math.floor(rnd() * 12);
+      R(rnd() < 0.5 ? A : B, x, hc - h, w, h);
+      for (let yy = hc - h + 2; yy < hc - 1; yy += 3) for (let xx = x + 1; xx < x + w - 1; xx += 2) if (rnd() < 0.5) R(WIN, xx, yy);
+      x += w;
+    }
+    const stepped = (cx, tiers, spire, col) => {
+      let y = hc;
+      for (const [w, h] of tiers) {
+        y -= h; R(col, cx - (w >> 1), y, w, h);
+        for (let yy = y + 1; yy < y + h - 1; yy += 2) for (let xx = cx - (w >> 1) + 1; xx < cx + (w >> 1); xx += 2) R(WIN, xx, yy);
+      }
+      R(col, cx, y - spire, 1, spire); R(col, cx - 1, y - spire + 1, 3, 1);
+    };
+    // высотка на набережной
+    stepped(Math.round(cw * 0.16), [[13, 14], [9, 8], [5, 6], [3, 3]], 7, B);
+    // МГУ: крылья, боковые башни и главный корпус со шпилем
+    const m = Math.round(cw * 0.72);
+    R(A, m - 22, hc - 13, 45, 13);
+    for (const s of [-19, 17]) { R(A, m + s, hc - 19, 5, 6); R(A, m + s + 2, hc - 24, 1, 5); }
+    for (let yy = hc - 11; yy < hc - 1; yy += 3) for (let xx = m - 21; xx < m + 22; xx += 2) R(WIN, xx, yy);
+    stepped(m, [[15, 30], [11, 8], [9, 6], [7, 5], [5, 3]], 10, A);
+  }
+
+  function paintMoscowNear(R, cw, hc) {
+    const BR = "#B8352E", BRD = "#922920", BRL = "#D9503F", GR = "#2E7A4B", GRL = "#46A065", GOLD = "#F2C14E", WH = "#F4EFE6", RED = "#E63946", DK = "#3B1613";
+    // Кремлёвская стена с зубцами «ласточкин хвост»
+    const wt = hc - 9;
+    R(BR, 0, wt, cw, 9); R(BRD, 0, wt, cw, 1);
+    for (let y = wt + 2; y < hc; y += 2) for (let x = (y & 2) ? 0 : 2; x < cw; x += 4) R(BRD, x, y, 2, 1);
+    for (let x = 0; x + 3 <= cw; x += 5) { R(BR, x, wt - 2, 3, 2); R(BRL, x, wt - 3); R(BRL, x + 2, wt - 3); }
+    const tent = (cx, y, ks, a, c) => ks.forEach((k, i) => R(i % 2 ? a : c, cx - k, y - 1 - i, 2 * k + 1, 1));
+    const smallTower = (cx, h) => {
+      const top = hc - h;
+      R(BR, cx - 3, top, 7, h); R(BRD, cx + 3, top, 1, h); R(WH, cx - 3, top, 7, 1); R(WH, cx - 3, top + 5, 7, 1);
+      R(DK, cx - 1, top + 2, 1, 2); R(DK, cx + 1, top + 2, 1, 2);
+      tent(cx, top, [3, 3, 2, 2, 1, 1, 0, 0], GR, GRL);
+      R(GOLD, cx, top - 10, 1, 2);
+    };
+    smallTower(Math.round(cw * 0.07), 15);
+    smallTower(Math.round(cw * 0.9), 17);
+    // Спасская башня
+    const sp = Math.round(cw * 0.64);
+    let y = hc - 20;
+    R(BR, sp - 5, y, 11, 20); R(BRD, sp + 5, y, 1, 20); R(WH, sp - 5, y, 11, 1); R(WH, sp - 5, y + 7, 11, 1);
+    R(DK, sp - 2, hc - 7, 5, 7); R(DK, sp - 1, hc - 8, 3, 1);
+    R(DK, sp - 3, y + 3, 1, 2); R(DK, sp + 3, y + 3, 1, 2);
+    y -= 7; R(BR, sp - 4, y, 9, 7); R(BRD, sp + 4, y, 1, 7); R(WH, sp - 4, y, 9, 1);
+    R(GOLD, sp - 2, y + 2, 5, 5); R("#1C2541", sp - 1, y + 3, 3, 3); R(GOLD, sp, y + 3, 1, 2);   // куранты
+    R(WH, sp - 5, y - 2, 1, 3); R(WH, sp + 5, y - 2, 1, 3);
+    y -= 5; R(BR, sp - 3, y, 7, 5); R(WH, sp - 3, y, 7, 1); R(DK, sp - 1, y + 2, 3, 2);
+    R(WH, sp - 4, y - 1, 1, 2); R(WH, sp + 4, y - 1, 1, 2);
+    y -= 4; R(WH, sp - 2, y, 5, 4); R(BR, sp - 1, y + 1, 3, 3);
+    tent(sp, y, [2, 2, 1, 1, 1, 0, 0], GR, GRL);
+    y -= 8; R(GOLD, sp, y);
+    R(RED, sp - 1, y - 2, 3, 1); R(RED, sp, y - 3, 1, 3);                                       // звезда
+    // Храм Василия Блаженного
+    const sb = Math.round(cw * 0.28), bb = hc - 8;
+    const onion = (cx, base, a, c, big) => {
+      const rows = big ? [2, 3, 3, 3, 2, 1, 0] : [1, 2, 2, 1, 0];
+      rows.forEach((k, i) => { for (let x = -k; x <= k; x++) R(((x + i) & 1) ? a : c, cx + x, base - 1 - i); });
+      R(GOLD, cx, base - 1 - rows.length, 1, 2);
+    };
+    R(BRL, sb - 2, bb - 13, 5, 13); R(WH, sb - 2, bb - 13, 5, 1); R(WH, sb - 2, bb - 7, 5, 1);
+    tent(sb, bb - 13, [2, 2, 2, 1, 1, 1, 0, 0], "#F4D35E", GR);
+    onion(sb, bb - 21, "#F4D35E", GOLD, false);
+    for (const [dx, h, a, c] of [[-8, 5, RED, "#2A9D8F"], [8, 5, RED, WH], [-4, 9, "#F4D35E", "#2A9D8F"], [4, 9, "#2563C9", WH]]) {
+      R(BRL, sb + dx - 1, bb - h, 3, h); R(WH, sb + dx - 1, bb - h, 3, 1);
+      onion(sb + dx, bb - h, a, c, true);
+    }
+    R(BR, sb - 11, bb, 23, 8); R(WH, sb - 11, bb, 23, 1);
+    for (let x = sb - 10; x <= sb + 10; x += 3) { R(WH, x, bb + 2, 1, 5); R(DK, x + 1, bb + 4, 1, 2); }
+  }
+
+  function paintSantoriniFar(R, cw, hc) {
+    const sea = 15, sy = hc - sea, rnd = seeded(3);
+    for (let x = 0; x < cw; x++) {
+      const f = x / cw;
+      let h = 0;
+      if (f > 0.05 && f < 0.5) h = Math.round(6 * Math.sin(Math.PI * (f - 0.05) / 0.45) + 1.5 * Math.sin(f * 40));
+      if (f > 0.66 && f < 0.86) h = Math.max(h, Math.round(3.5 * Math.sin(Math.PI * (f - 0.66) / 0.2)));
+      if (h > 0) { R("#7D6687", x, sy - h, 1, h); R("#6A5675", x, sy - 1); }
+    }
+    R("#A8D8F5", 0, sy, cw, 1);
+    for (let y = sy + 1; y < hc; y++) R(y - sy > 9 ? "#2367AA" : "#2C7CC6", 0, y, cw, 1);
+    for (let i = 0; i < 26; i++) R("#5FA6E0", Math.floor(rnd() * (cw - 3)), sy + 2 + Math.floor(rnd() * (sea - 3)), 2 + Math.floor(rnd() * 3), 1);
+    const bx = Math.round(cw * 0.58);                                                            // парусник
+    R("#7A4B32", bx, sy - 1, 4, 1); R("#FFFFFF", bx + 1, sy - 4, 1, 3); R("#FFFFFF", bx + 2, sy - 3, 1, 2);
+  }
+
+  function paintSantoriniNear(R, cw, hc) {
+    const WH = "#FFFFFF", SH = "#D9E4EE", BL = "#1F5FC8", BLL = "#3C7BE0", rnd = seeded(5);
+    const top = (x) => Math.round(hc - (21 + 6 * Math.sin(2 * Math.PI * x / cw) + 3 * Math.sin(6 * Math.PI * x / cw + 1)));
+    for (let x = 0; x < cw; x++) {                                                              // вулканический обрыв
+      const t = top(x);
+      R("#A45A36", x, t, 1, hc - t);
+      for (let y = t + 2; y < hc; y++) if ((y + Math.floor(x / 6)) % 5 === 0) R("#7C3F26", x, y);
+      R("#C9774A", x, t);
+    }
+    const span = (x, w) => { let a = hc, z = 0; for (let i = 0; i < w; i++) { const t = top(x + i); a = Math.min(a, t); z = Math.max(z, t); } return [a, z]; };
+    const house = (x, w) => {
+      const [a, z] = span(x, w), hh = 3 + Math.floor(rnd() * 4), y0 = a - hh;
+      const col = rnd() < 0.15 ? "#F2C76E" : rnd() < 0.12 ? "#F3A99E" : WH;
+      R(col, x, y0, w, z - y0 + 1); R(SH, x + w - 1, y0, 1, z - y0 + 1);
+      R(rnd() < 0.5 ? BL : "#6B4B3A", x + 1, y0 + hh - 2, 1, 2);
+      if (rnd() < 0.7) R(BL, x + w - 3, y0 + 1);
+      if (rnd() < 0.35 && y0 > 6) {
+        const w2 = Math.max(3, w - 2), x2 = x + (rnd() < 0.5 ? 0 : w - w2);
+        R(WH, x2, y0 - 3, w2, 3); R(SH, x2 + w2 - 1, y0 - 3, 1, 3); R(BL, x2 + 1, y0 - 2);
+      }
+    };
+    const church = (x) => {
+      const [a, z] = span(x, 10), y0 = a - 6;
+      R(WH, x, y0, 7, z - y0 + 1); R(SH, x + 6, y0, 1, z - y0 + 1); R(BL, x + 3, y0 + 3, 1, 3);
+      [3, 3, 2, 1].forEach((k, i) => R(BL, x + 3 - k, y0 - 1 - i, 2 * k + 1, 1));             // синий купол
+      R(BLL, x + 1, y0 - 2, 2, 1);
+      R(WH, x + 3, y0 - 7, 1, 3); R(WH, x + 2, y0 - 6, 3, 1);                                     // крест
+      R(WH, x + 7, y0 - 3, 3, z - y0 + 4); R(SH, x + 9, y0 - 3, 1, z - y0 + 4);                  // колокольня
+      R(BL, x + 8, y0 - 2, 1, 2); R(BL, x + 8, y0 + 1); R(BL, x + 7, y0 - 4, 3, 1); R(BL, x + 8, y0 - 5); R(WH, x + 8, y0 - 7, 1, 2);
+    };
+    const windmill = (cx) => {
+      const [a, z] = span(cx - 1, 3), y0 = a - 7;
+      R(WH, cx - 1, y0, 3, z - y0 + 1); R(SH, cx + 1, y0, 1, z - y0 + 1); R("#6B4B3A", cx, y0 + 5, 1, 2);
+      [2, 1, 0].forEach((k, i) => R("#C9A36A", cx - k, y0 - 1 - i, 2 * k + 1, 1));
+      for (let i = 1; i <= 4; i++) for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+        R("#7A5236", cx + sx * i, y0 - 2 + sy * i); if (i > 1) R(WH, cx + sx * i + (sy > 0 ? -sx : 0), y0 - 2 + sy * i + (sy < 0 ? 1 : 0));
+      }
+    };
+    const mill = Math.round(cw * 0.84);
+    for (let x = 1; x < cw - 10;) {
+      if (x + 10 > mill - 3 && x < mill + 4) { x = mill + 4; continue; }
+      if (rnd() < 0.16) { church(x); x += 11; }
+      else { const w = 4 + Math.floor(rnd() * 4); house(x, w); x += w + (rnd() < 0.3 ? 1 : 0); }
+    }
+    windmill(mill);
+  }
+
+  function paintYerevanFar(R, cw, hc) {
+    const wrap = (x, p) => { const d = x - p; return ((d % cw) + cw * 1.5) % cw - cw / 2; };
+    const p1 = cw * 0.36, p2 = cw * 0.8;
+    for (let x = 0; x < cw; x++) {
+      const d1 = wrap(x, p1), d2 = wrap(x, p2);
+      const h1 = 58 * Math.pow(Math.max(0, 1 - Math.abs(d1) / (d1 < 0 ? 50 : 42)), 1.25);       // Масис
+      const h2 = 30 * Math.pow(Math.max(0, 1 - Math.abs(d2) / 22), 1.1);                         // Сис
+      const big = h1 >= h2, h = Math.round(Math.max(h1, h2));
+      if (h <= 0) continue;
+      const t = hc - h, left = big ? d1 < 0 : d2 < 0, H0 = big ? 58 : 30, frac = big ? 0.4 : 0.24;
+      R(left ? "#B3A6CC" : "#9588B4", x, t, 1, h);
+      const snow = Math.round(hc - H0 * (1 - frac) + 2.2 * Math.sin(x * 1.3) + 1.3 * Math.sin(x * 0.47));
+      if (t < snow) R(left ? "#FFFFFF" : "#D6DDEE", x, t, 1, Math.min(h, snow - t));
+    }
+  }
+
+  function paintYerevanNear(R, cw, hc) {
+    const TUFF = ["#D89A88", "#C9826F", "#E2AE9C", "#B9715F"], WIN = "#6E3A35", rnd = seeded(21);
+    const building = (x, w, h) => {
+      const y0 = hc - h;
+      R(TUFF[Math.floor(rnd() * TUFF.length)], x, y0, w, h); R("#8E4C42", x, y0, w, 1); R("#00000022", x + w - 1, y0, 1, h);
+      for (let yy = y0 + 2; yy < hc - 4; yy += 4) for (let xx = x + 1; xx < x + w - 1; xx += 2) { R(WIN, xx, yy + 1, 1, 2); R("#F1D3C6", xx, yy); }
+      for (let xx = x + 1; xx < x + w - 2; xx += 3) { R(WIN, xx, hc - 3, 2, 3); }               // арки первого этажа
+    };
+    const fill = (x0, x1) => { for (let x = x0; x < x1 - 3;) { const w = Math.min(x1 - x, 7 + Math.floor(rnd() * 7)); building(x, w, 10 + Math.floor(rnd() * 11)); x += w; } };
+    // Каскад: белые террасы с садами, поднимаются вправо
+    const c0 = Math.round(cw * 0.1), steps = 6, sw = 4, sh = 4, cEnd = c0 + steps * sw + 2;
+    fill(0, c0);
+    for (let i = 0; i < steps; i++) {
+      const x = c0 + i * sw, y = hc - (i + 1) * sh, w = cEnd - x;
+      R("#EFE4CE", x, y, w, sh); R("#5CA64E", x, y, w, 1);
+      for (let xx = x + 1; xx < x + w; xx += 2) R("#D5C4A2", xx, y + 2, 1, 2);
+      R("#7CC4F0", x + 1, y + 1, 2, 1);                                                        // фонтаны
+    }
+    // телебашня
+    const tx = Math.round(cw * 0.9), th = 42;
+    fill(cEnd + 1, tx - 4);
+    fill(tx + 4, cw);
+    for (let i = 0; i < th; i++) { const k = i < 6 ? 2 : i < 22 ? 1 : 0; R(Math.floor(i / 4) % 2 ? "#F7F3EA" : "#D64045", tx - k, hc - 1 - i, 2 * k + 1, 1); }
+    R("#D64045", tx - 3, hc - 31, 7, 2); R("#F7F3EA", tx - 2, hc - 32, 5, 1); R("#D64045", tx, hc - th - 4, 1, 4);
+    // пирамидальные тополя
+    for (const f of [0.05, 0.47, 0.55, 0.78]) {
+      const x = Math.round(cw * f);
+      R("#2F6B3A", x - 1, hc - 11, 3, 9); R("#2F6B3A", x, hc - 13, 1, 2); R("#3F8A4A", x - 1, hc - 10, 1, 6); R("#5B3A29", x, hc - 2, 1, 2);
+    }
+  }
+
+  function buildRegions(b) {
+    const cw = Math.round(tileW / b);
+    const L = (hc, paint) => cellLayer(cw, hc, b, paint);
+    tex.regions = [
+      { far: null, near: tex.hills },
+      { far: L(66, paintMoscowFar), near: L(48, paintMoscowNear) },
+      { far: L(34, paintSantoriniFar), near: L(44, paintSantoriniNear) },
+      { far: L(70, paintYerevanFar), near: L(46, paintYerevanNear) },
+    ];
+  }
+
   function buildTextures() {
     const b = block;
     tex.skies = SKIES.map(def => buildSky(def, b));
@@ -344,24 +723,41 @@
       rect(g, OUTLINE, 0, capH - b, pw, b);
       rect(g, "#3E8A2A", over, capH, bodyW, b);
     });
+    buildRegions(b);
   }
 
   // ---------- Текст с обводкой ----------
+  // Текст рисуется один раз в отдельный холст и дальше просто копируется — это сильно дешевле strokeText каждый кадр
+  const measureCtx = document.createElement("canvas").getContext("2d");
+  function textSprite(str, size, color, outline, stroke) {
+    const key = `${str}|${size.toFixed(2)}|${color}|${outline}|${stroke.toFixed(2)}|${fontReady ? 1 : 0}`;
+    let s = textCache.get(key);
+    if (s) return s;
+    const fs = fontReady ? size * PIXEL_FONT_SCALE : size, font = `${fontReady ? "" : "900 "}${fs}px ${FONT}`;
+    measureCtx.font = font;
+    const tw = measureCtx.measureText(str).width, pad = Math.ceil(stroke * 2 + 2), cy = pad + fs * 0.7;
+    s = offscreen(tw + pad * 2, fs * 1.4 + pad * 2 + stroke, (g) => {
+      g.font = font; g.textAlign = "center"; g.textBaseline = "middle"; g.lineJoin = "round";
+      g.lineWidth = stroke * 2; g.strokeStyle = outline;
+      const cx = tw / 2 + pad;
+      g.strokeText(str, cx, cy + stroke * 0.8);   // тень
+      g.strokeText(str, cx, cy);
+      g.fillStyle = color; g.fillText(str, cx, cy);
+    });
+    s.ax = tw / 2 + pad; s.ay = cy; s.tw = tw;
+    if (textCache.size > 300) textCache.clear();
+    textCache.set(key, s);
+    return s;
+  }
   function text(str, x, y, size, color = "#fff", opts = {}) {
     const { align = "center", outline = OUTLINE, stroke = Math.max(2, size * (fontReady ? 0.16 : 0.08)), alpha = 1 } = opts;
-    const fs = fontReady ? size * PIXEL_FONT_SCALE : size;
-    ctx.save();
-    ctx.globalAlpha *= alpha;
-    ctx.font = `${fontReady ? "" : "900 "}${fs}px ${FONT}`;
-    ctx.textAlign = align; ctx.textBaseline = "middle";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = stroke * 2;
-    ctx.strokeStyle = outline;
-    ctx.strokeText(str, x, y + stroke * 0.8);   // тень
-    ctx.strokeText(str, x, y);
-    ctx.fillStyle = color;
-    ctx.fillText(str, x, y);
-    ctx.restore();
+    if (alpha <= 0) return;
+    const s = textSprite(String(str), size, color, outline, stroke);
+    const dx = align === "center" ? x - s.ax : align === "right" ? x - s.ax - s.tw / 2 : x - s.ax + s.tw / 2;
+    const a0 = ctx.globalAlpha;
+    ctx.globalAlpha = a0 * alpha;
+    ctx.drawImage(s, dx, y - s.ay, s.w, s.h);
+    ctx.globalAlpha = a0;
   }
   let fontReady = false;
 
@@ -393,7 +789,7 @@
       this.title = images.title;
       this.best = parseInt(store.get("bestScore", "0"), 10) || 0;
       this.t = 0;
-      this.scroll = { ground: 0, hills: 0, clouds: 0 };
+      this.scroll = { ground: 0, hills: 0, clouds: 0, far: 0 };
       this.buttons = [];
       this.reset();
     }
@@ -403,7 +799,7 @@
       // тайлы пересобраны под новую ширину — прокрутка не должна выходить за tileW (иначе справа «дыра»)
       for (const key in this.scroll) this.scroll[key] %= tileW;
       if (this.state === "ready") { this.bird.y = this.birdStartY; return; }
-      if (!isFinite(k) || k <= 0 || !oldW) return;
+      if (!isFinite(k) || k <= 0 || !oldW || (Math.abs(k - 1) < 1e-6 && oldW === W)) return;   // только сменилась чёткость
       // пересчитываем мир под новый размер экрана, чтобы трубы не «уехали»
       const ox = oldW * 0.3, nx = this.birdX;
       for (const p of this.pipes) { p.x = nx + (p.x - ox) * k; p.gapY *= k; p.baseY *= k; p.gap *= k; if (p.move) p.move.amp *= k; }
@@ -428,6 +824,8 @@
       this.buttons = [];
       this.particles = [];
       this.sky = { from: 0, to: 0, t: 1 };
+      this.region = { from: 0, to: 0, t: 1 };
+      this.banner = null;
       this.playT = 0;
       this.resumeIn = 0;
       this.confetti = false;
@@ -460,9 +858,9 @@
     tap(x, y) {
       Audio.unlock();
       const inR = (r) => r && x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
-      if (this.state === "ready" || this.state === "over") {
-        if (inR(this.muteRect)) { Audio.muted = !Audio.muted; store.set("muted", Audio.muted ? "1" : "0"); return; }
-        if (inR(this.lbRect)) { Audio.play("swoosh"); LBUI.open(); return; }
+      if (this.state === "ready" || this.state === "over" || this.state === "paused") {
+        if (inR(this.muteRect)) { VolUI.open(); return; }
+        if (this.state !== "paused" && inR(this.lbRect)) { Audio.play("swoosh"); LBUI.open(); return; }
       }
       switch (this.state) {
         case "ready": this.start(); this.flap(); break;
@@ -603,6 +1001,8 @@
         return;   // мир заморожен
       }
       this.sky.t = Math.min(1, this.sky.t + dt / 1.6);
+      this.region.t = Math.min(1, this.region.t + dt / 1.2);
+      if (this.banner) { this.banner.t += dt; if (this.banner.t > 2.6) this.banner = null; }
       this.updateParticles(dt);
 
       const dx = CFG.speed * u * dt;
@@ -610,6 +1010,7 @@
         this.scroll.ground = (this.scroll.ground + dx) % tileW;
         this.scroll.hills = (this.scroll.hills + dx * 0.35) % tileW;
         this.scroll.clouds = (this.scroll.clouds + dx * 0.15) % tileW;
+        this.scroll.far = (this.scroll.far + dx * 0.07) % tileW;
       }
       const bird = this.bird, r = CFG.hitRadius * u;
 
@@ -660,6 +1061,11 @@
       this.burst(this.birdX + 6 * u, this.bird.y, 7, { colors: ["#FFD23F", "#FFFFFF"], speed: [60, 170], size: [3, 6], life: [0.3, 0.55], g: 200 });
       const theme = Math.floor(this.score / CFG.themeEvery) % SKIES.length;
       if (theme !== this.sky.to) this.sky = { from: this.sky.to, to: theme, t: 0 };
+      const region = Math.floor(this.score / CFG.regionEvery) % REGIONS.length;
+      if (region !== this.region.to) {
+        this.region = { from: this.region.to, to: region, t: 0 };
+        this.banner = { text: REGIONS[region].name, t: 0 };
+      }
       if (this.score === CFG.moveFrom) toast("ТРУБЫ ОЖИЛИ!");
     }
 
@@ -682,10 +1088,21 @@
     }
 
     // ---------- Отрисовка ----------
-    drawTiles(c, offset, y) {
+    drawTiles(c, offset, y, g = ctx) {
       const x = -Math.floor(offset);
-      ctx.drawImage(c, x, y, c.w, c.h);
-      ctx.drawImage(c, x + tileW, y, c.w, c.h);
+      g.drawImage(c, x, y, c.w, c.h);
+      if (x + c.w < W) g.drawImage(c, x + tileW, y, c.w, c.h);
+    }
+
+    // слои региона (дальний план, облака, ближний план) с оттенком времени суток
+    drawRegion(idx, alpha, tint) {
+      if (alpha <= 0) return;
+      const rt = tex.regions[idx];
+      ctx.globalAlpha = alpha;
+      if (rt.far) this.drawTiles(tinted(rt.far, tint), this.scroll.far, groundY - rt.far.h);
+      if (REGIONS[idx].clouds) this.drawTiles(tinted(tex.clouds, tint), this.scroll.clouds, groundY - tex.clouds.h);
+      this.drawTiles(tinted(rt.near, tint), this.scroll.hills, groundY - rt.near.h + block);
+      ctx.globalAlpha = 1;
     }
 
     draw() {
@@ -694,29 +1111,32 @@
         const m = 7 * u * (this.shake / 0.22);
         ctx.translate((Math.random() * 2 - 1) * m, (Math.random() * 2 - 1) * m);
       }
-      const sk = this.sky, st = easeOut(sk.t);
-      ctx.drawImage(tex.skies[sk.from], 0, 0, W, H);
-      if (sk.to !== sk.from && st > 0) {
-        ctx.globalAlpha = st; ctx.drawImage(tex.skies[sk.to], 0, 0, W, H); ctx.globalAlpha = 1;
-      }
-      this.drawTiles(tex.clouds, this.scroll.clouds, groundY - tex.clouds.h);
-      this.drawTiles(tex.hills, this.scroll.hills, groundY - tex.hills.h + block);
-      // затемнение дальнего плана под время суток
-      const farTop = groundY - tex.clouds.h;
-      for (const [idx, a] of [[sk.from, 1 - (sk.to !== sk.from ? st : 0)], [sk.to, sk.to !== sk.from ? st : 0]]) {
-        const tint = SKIES[idx].tint;
-        if (!tint || a <= 0) continue;
-        ctx.globalAlpha = a; ctx.fillStyle = tint; ctx.fillRect(0, farTop, W, groundY - farTop + block); ctx.globalAlpha = 1;
-      }
+      // небо: во время смены времени суток — плавный переход, иначе один рисунок
+      const sk = this.sky, st = easeOut(sk.t), skyFading = sk.to !== sk.from && sk.t < 1;
+      ctx.drawImage(tex.skies[skyFading ? sk.from : sk.to], 0, 0, W, H);
+      if (skyFading && st > 0) { ctx.globalAlpha = st; ctx.drawImage(tex.skies[sk.to], 0, 0, W, H); ctx.globalAlpha = 1; }
 
-      const pw = tex.pipe.w;
+      // регион: обычно 2–3 готовые картинки; при смене региона/времени суток — плавное наложение
+      const rg = this.region, rt = easeOut(rg.t), regFading = rg.to !== rg.from && rg.t < 1;
+      const regs = regFading ? [[rg.from, 1 - rt], [rg.to, rt]] : [[rg.to, 1]];
+      const tintA = SKIES[skyFading ? sk.from : sk.to].tint;
+      for (const [r, a] of regs) this.drawRegion(r, a, tintA);
+      if (skyFading && st > 0) for (const [r, a] of regs) this.drawRegion(r, a * st, SKIES[sk.to].tint);
+
+      // трубы: рисуем только видимую часть текстуры
+      const pw = tex.pipe.w, sc = tex.pipe.width / pw;
       for (const p of this.pipes) {
-        ctx.drawImage(tex.pipe, p.x - pw / 2, p.gapY + p.gap / 2, pw, H);
-        ctx.save();
-        ctx.translate(p.x, p.gapY - p.gap / 2);
-        ctx.scale(1, -1);
-        ctx.drawImage(tex.pipe, -pw / 2, 0, pw, H);
-        ctx.restore();
+        if (p.x + pw / 2 < 0 || p.x - pw / 2 > W) continue;
+        const bottom = p.gapY + p.gap / 2, top = p.gapY - p.gap / 2;
+        const hb = Math.min(H, groundY + block - bottom), ht = Math.min(H, top + 2);
+        if (hb > 0) ctx.drawImage(tex.pipe, 0, 0, tex.pipe.width, hb * sc, p.x - pw / 2, bottom, pw, hb);
+        if (ht > 0) {
+          ctx.save();
+          ctx.translate(p.x, top);
+          ctx.scale(1, -1);
+          ctx.drawImage(tex.pipe, 0, 0, tex.pipe.width, ht * sc, -pw / 2, 0, pw, ht);
+          ctx.restore();
+        }
       }
       this.drawTiles(tex.ground, this.scroll.ground, groundY);
       this.drawParticles(false);
@@ -760,12 +1180,24 @@
       ctx.moveTo(-10 * k, -5 * k); ctx.lineTo(-4 * k, -5 * k); ctx.lineTo(3 * k, -11 * k);
       ctx.lineTo(3 * k, 11 * k); ctx.lineTo(-4 * k, 5 * k); ctx.lineTo(-10 * k, 5 * k); ctx.closePath(); ctx.fill();
       ctx.strokeStyle = "#fff"; ctx.lineWidth = 2.5 * k; ctx.lineCap = "round";
-      if (Audio.muted) {
+      const lvl = Audio.level;   // волны по уровню громкости, крестик — если всё на нуле
+      if (lvl <= 0) {
         ctx.beginPath(); ctx.moveTo(7 * k, -6 * k); ctx.lineTo(14 * k, 6 * k); ctx.moveTo(14 * k, -6 * k); ctx.lineTo(7 * k, 6 * k); ctx.stroke();
       } else {
         ctx.beginPath(); ctx.arc(4 * k, 0, 6 * k, -0.9, 0.9); ctx.stroke();
-        ctx.beginPath(); ctx.arc(4 * k, 0, 11 * k, -0.9, 0.9); ctx.stroke();
+        if (lvl > 0.5) { ctx.beginPath(); ctx.arc(4 * k, 0, 11 * k, -0.9, 0.9); ctx.stroke(); }
       }
+      ctx.restore();
+    }
+
+    drawBanner() {
+      const b = this.banner;
+      if (!b) return;
+      const a = b.t < 0.25 ? b.t / 0.25 : b.t > 2.1 ? Math.max(0, 1 - (b.t - 2.1) / 0.5) : 1;
+      const sc = 0.7 + 0.3 * easeBack(b.t / 0.35), y = safeTop + 125 * u;
+      ctx.save(); ctx.translate(W / 2, y); ctx.scale(sc, sc);
+      text("ДОБРО ПОЖАЛОВАТЬ", 0, -24 * u, 12 * u, "#fff", { alpha: a });
+      text(b.text, 0, 6 * u, 30 * u, "#FFD23F", { alpha: a });
       ctx.restore();
     }
 
@@ -832,8 +1264,9 @@
         ctx.scale(pop, pop);
         text(String(this.score), 0, 0, 56 * u, "#fff", { alpha: s === "dying" ? Math.max(0, 1 - this.stateTime * 4) : 1 });
         ctx.restore();
+        if (s !== "paused") this.drawBanner();
         if (s === "playing") this.drawPauseButton();
-        if (s === "paused") this.drawPaused();
+        if (s === "paused") { this.drawPaused(); this.drawMute(); }
       } else if (s === "over") {
         this.drawGameOver();
         this.drawMute();
@@ -1102,34 +1535,100 @@
   };
   LBUI.init();
 
+  // ---------- Панель громкости ----------
+  const VolUI = {
+    el: document.getElementById("vol"),
+    get isOpen() { return !this.el.hidden; },
+    sync: {},
+    init() {
+      for (const kind of ["music", "sfx"]) {
+        const input = document.getElementById("vol-" + kind), out = document.getElementById("vol-" + kind + "-v");
+        this.sync[kind] = () => {
+          const v = Math.round(Audio.vol[kind] * 100);
+          input.value = v; out.textContent = v; input.style.setProperty("--p", v + "%");
+        };
+        input.addEventListener("input", () => {
+          Audio.unlock();
+          Audio.setVolume(kind, input.value / 100);
+          this.sync[kind]();
+          if (kind === "sfx") this.preview();
+        });
+      }
+      document.getElementById("vol-close").addEventListener("click", () => this.close());
+      this.el.addEventListener("pointerdown", (e) => { if (e.target === this.el) this.close(); });
+    },
+    preview() {   // короткий «дзынь», чтобы было слышно громкость эффектов
+      const t = performance.now();
+      if (t - (this.last || 0) > 160) { this.last = t; Audio.play("point"); }
+    },
+    open() {
+      if (game) { game.pause(); game.resumeIn = 0; }
+      this.sync.music(); this.sync.sfx();
+      this.el.hidden = false;
+    },
+    close() {
+      this.el.hidden = true;
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    },
+  };
+  VolUI.init();
+  const modalOpen = () => LBUI.isOpen || VolUI.isOpen;
+
   // ---------- Ввод ----------
   function pointer(e) {
     e.preventDefault();
-    if (!game || LBUI.isOpen) return;
+    if (!game || modalOpen()) return;
     const r = canvas.getBoundingClientRect();
     game.tap(e.clientX - r.left, e.clientY - r.top);
   }
   canvas.addEventListener("pointerdown", pointer, { passive: false });
   document.addEventListener("keydown", (e) => {
-    if (LBUI.isOpen) { if (e.code === "Escape") LBUI.close(); return; }   // не мешаем вводить имя
+    if (modalOpen()) {   // не мешаем вводить имя и двигать ползунки
+      if (e.code === "Escape") { LBUI.isOpen && LBUI.close(); VolUI.isOpen && VolUI.close(); }
+      return;
+    }
     if (e.repeat || !game) return;
     if (e.code === "Space" || e.code === "ArrowUp" || e.code === "Enter") { e.preventDefault(); game.key(); }
     else if (e.code === "KeyP" || e.code === "Escape") { e.preventDefault(); game.togglePause(); }
+    else if (e.code === "KeyM") {   // M — быстро выключить/вернуть звук
+      Audio.unlock();
+      if (Audio.level > 0) { Audio.saved = { ...Audio.vol }; Audio.setVolume("music", 0); Audio.setVolume("sfx", 0); toast("ЗВУК ВЫКЛЮЧЕН"); }
+      else { const s = Audio.saved || { music: 0.6, sfx: 0.85 }; Audio.setVolume("music", s.music); Audio.setVolume("sfx", s.sfx); toast("ЗВУК ВКЛЮЧЁН"); }
+    }
   });
   ["touchstart", "touchmove", "gesturestart", "dblclick"].forEach(ev =>
-    document.addEventListener(ev, (e) => { if (!LBUI.isOpen) e.preventDefault(); }, { passive: false }));
-  // автопауза, когда игру свернули или переключили вкладку/окно
-  document.addEventListener("visibilitychange", () => { last = performance.now(); if (document.hidden && game) game.pause(); });
+    document.addEventListener(ev, (e) => { if (!modalOpen()) e.preventDefault(); }, { passive: false }));
+  // автопауза, когда игру свернули или переключили вкладку/окно; звук на это время засыпает
+  document.addEventListener("visibilitychange", () => {
+    last = performance.now();
+    if (document.hidden) { if (game) game.pause(); if (Audio.ctx) Audio.ctx.suspend(); }
+    else if (Audio.ctx && Audio.unlocked) Audio.ctx.resume();
+  });
   window.addEventListener("blur", () => { if (game) game.pause(); });
+
+  // Если устройство не тянет 60 FPS (а экран может), понижаем чёткость холста
+  const perf = { n: 0, sum: 0, minDt: 1 };
+  function watchPerf(dt) {
+    if (!game || game.state !== "playing" || document.hidden) { perf.n = perf.sum = 0; return; }
+    perf.minDt = Math.min(perf.minDt, dt); perf.n++; perf.sum += dt;
+    if (perf.n < 120) return;
+    const avg = perf.sum / perf.n;
+    perf.n = perf.sum = 0;
+    if (avg > 0.021 && perf.minDt < 0.0185 && dpr > 1 && renderScale > 0.5) { renderScale = Math.max(0.5, renderScale * 0.75); resize(); }
+  }
 
   // ---------- Цикл ----------
   let last = performance.now();
   function frame(now) {
-    const dt = Math.min((now - last) / 1000, 1 / 30);
+    const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     if (game) {
-      game.update(dt);
+      // физика шагами ≤ 1/60 с: при просадке кадров игра не уходит в «слоу-мо», а на 120 Гц идёт плавно
+      const steps = Math.max(1, Math.ceil(dt * 60 - 0.25));
+      for (let i = 0; i < steps; i++) game.update(dt / steps);
       game.draw();
+      Music.setMood(game.state);
+      watchPerf(dt);
       if (toastState) {
         const T = toastState;
         if (game.state !== "paused") T.t += dt;
@@ -1152,11 +1651,11 @@
       : Promise.resolve();
     const [vanik, title] = await Promise.all([img("vanik.png"), img("title.png"), fontP]);
     game = new Game({ vanik, title });
-    if (location.hash === "#debug") window.__game = game;
+    if (location.hash === "#debug") { window.__game = game; window.__audio = { Audio, Music }; }
     document.getElementById("loading").remove();
     // «что нового» — один раз для тех, кто уже играл в прошлую версию
     if (store.get("seenVersion", "") !== VERSION) {
-      if (game.best > 0) toast("НОВОЕ: НОЧЬ, ТОП, ПАУЗА!", 4);
+      if (game.best > 0) toast("НОВОЕ: ГОРОДА, МУЗЫКА, ГРОМКОСТЬ!", 4);
       store.set("seenVersion", VERSION);
     }
     requestAnimationFrame(frame);
