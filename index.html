@@ -160,7 +160,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.13";
+  const VERSION = "1.14";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 178, minGap: 148,
@@ -2290,11 +2290,14 @@
       for (const b of this.el.querySelectorAll(".opt")) {
         const k = b.dataset.k, sync = () => { b.classList.toggle("on", OPT[k]); b.setAttribute("aria-checked", OPT[k] ? "true" : "false"); };
         sync();
-        b.addEventListener("click", () => {
+        const toggle = () => {
           OPT[k] = !OPT[k]; store.set(this.keys[k], OPT[k] ? "1" : "0"); sync(); b.blur();
           Audio.unlock(); Audio.play("swoosh");
           if (game) game.applyOptions();
-        });
+        };
+        // палец или мышь: переключаем сразу при касании, не дожидаясь «клика» (некоторые телефоны его не присылают)
+        b.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); toggle(); });
+        b.addEventListener("click", (e) => { if (e.detail === 0) toggle(); }); // с клавиатуры
       }
       window.addEventListener("resize", () => this.place());
     },
