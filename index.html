@@ -136,7 +136,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.3";
+  const VERSION = "1.4";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 76, pipeSpacing: 235, baseGap: 178, minGap: 148,
@@ -246,14 +246,23 @@
     },
   };
 
-  // ---------- Фоновая музыка: у каждого региона своя тема (чиптюн на WebAudio), 8 тактов ----------
-  // мелодия: [позиция 16-й в такте, MIDI-нота, длина в 16-х]; аккорд: [бас, [4 ноты арпеджио]]
+  // ---------- Фоновая музыка: стартовая тема + своя песня у каждого города (чиптюн на WebAudio), 8 тактов ----------
+  // мелодия: [позиция в такте (16-е), MIDI-нота, длина в 16-х]; аккорд: [бас, [4 ноты]]
   const CH = {
     Am: [45, [57, 60, 64, 69]], Dm: [38, [57, 62, 65, 69]], E: [40, [56, 59, 64, 68]], Gm: [43, [58, 62, 67, 70]],
     A: [45, [57, 61, 64, 69]], C: [48, [55, 60, 64, 67]], F: [41, [53, 57, 60, 65]], G: [43, [55, 59, 62, 67]], Bb: [46, [58, 62, 65, 70]],
+    // джазовые септаккорды
+    Em7b5: [40, [52, 55, 58, 62]], A7: [45, [55, 57, 61, 64]], Dm7: [38, [57, 60, 62, 65]], Gm7: [43, [58, 62, 65, 67]], C7: [36, [55, 58, 60, 64]], Fmaj7: [41, [57, 60, 64, 65]],
+  };
+  // духовые и язычковые: волна, фильтр, громкость, вибрато (в центах), подъезд к ноте снизу
+  const WINDS = {
+    sax: { waves: ["sawtooth"], cut: 2200, v: 0.075, vib: 12, bend: 0.94, att: 0.04 },
+    zurna: { waves: ["square", "sawtooth"], cut: 3800, v: 0.05, vib: 8, bend: 0.97, att: 0.02 },
+    flute: { waves: ["triangle", "sine"], cut: 5000, v: 0.11, vib: 10, bend: 0.99, att: 0.05 },
+    accordion: { waves: ["square", "sawtooth"], cut: 2600, v: 0.04, vib: 4, bend: 1, att: 0.03 },
   };
   const THEMES = [
-    { // Зелёная долина: Am – F – C – G
+    { // Старт (Зелёная долина): Am – F – C – G
       bpm: 140, voice: "chip", bass: "pop", arp: true, drum: "pop", chords: [CH.Am, CH.F, CH.C, CH.G],
       lead: [
         [[0, 76, 2], [2, 81, 2], [4, 79, 1], [5, 76, 1], [6, 74, 2], [8, 76, 4], [12, 72, 2], [14, 74, 2]],
@@ -266,74 +275,77 @@
         [[0, 83, 2], [2, 81, 2], [4, 79, 2], [6, 74, 2], [8, 79, 4], [12, 71, 2], [14, 74, 2]],
       ],
     },
-    { // Москва: русская плясовая — балалайка тремоло, «ум-па»
-      bpm: 150, voice: "trem", bass: "oompah", arp: false, drum: "polka", chords: [CH.Am, CH.Dm, CH.E, CH.Am],
+    { // Москва: русский этно-поп — свирель, синт-арпеджио, бочка «в пол»
+      bpm: 128, voice: "flute", bass: "pop", arp: true, drum: "edm", chords: [CH.Dm, CH.Bb, CH.C, CH.Dm, CH.Dm, CH.Bb, CH.C, CH.A],
       lead: [
-        [[0, 76, 2], [2, 76, 2], [4, 74, 2], [6, 72, 2], [8, 71, 2], [10, 72, 2], [12, 69, 4]],
-        [[0, 74, 2], [2, 74, 2], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 72, 2], [14, 74, 2]],
-        [[0, 76, 3], [3, 74, 1], [4, 72, 2], [6, 71, 2], [8, 68, 2], [10, 71, 2], [12, 76, 4]],
-        [[0, 72, 2], [2, 71, 2], [4, 69, 4], [8, 64, 2], [10, 69, 2], [12, 69, 4]],
-        [[0, 81, 1], [1, 81, 1], [2, 81, 2], [4, 79, 1], [5, 77, 1], [6, 76, 2], [8, 77, 1], [9, 76, 1], [10, 74, 2], [12, 72, 4]],
-        [[0, 74, 1], [1, 74, 1], [2, 77, 2], [4, 81, 2], [6, 77, 2], [8, 74, 2], [10, 77, 2], [12, 74, 4]],
-        [[0, 80, 2], [2, 83, 2], [4, 80, 2], [6, 76, 2], [8, 74, 2], [10, 71, 2], [12, 68, 2], [14, 71, 2]],
-        [[0, 69, 2], [2, 72, 2], [4, 76, 2], [6, 72, 2], [8, 69, 4], [12, 69, 4]],
+        [[0, 74, 3], [3, 72, 1], [4, 74, 2], [6, 77, 2], [8, 76, 2], [10, 74, 2], [12, 72, 2], [14, 69, 2]],
+        [[0, 70, 3], [3, 72, 1], [4, 74, 2], [6, 72, 2], [8, 70, 4], [12, 69, 2], [14, 70, 2]],
+        [[0, 72, 3], [3, 74, 1], [4, 76, 2], [6, 79, 2], [8, 77, 2], [10, 76, 2], [12, 74, 2], [14, 72, 2]],
+        [[0, 74, 6], [6, 69, 2], [8, 74, 8]],
+        [[0, 81, 2], [2, 81, 2], [4, 79, 2], [6, 77, 2], [8, 79, 2], [10, 77, 2], [12, 76, 2], [14, 74, 2]],
+        [[0, 77, 2], [2, 77, 2], [4, 76, 2], [6, 74, 2], [8, 74, 4], [12, 70, 2], [14, 74, 2]],
+        [[0, 76, 2], [2, 79, 2], [4, 77, 2], [6, 76, 2], [8, 74, 2], [10, 72, 2], [12, 74, 2], [14, 76, 2]],
+        [[0, 73, 4], [4, 76, 4], [8, 81, 8]],
       ],
     },
-    { // Санторини: греческий танец — бузуки, бубен
-      bpm: 132, voice: "trem", bass: "fifth", arp: true, drum: "light", chords: [CH.Dm, CH.Gm, CH.A, CH.Dm],
+    { // Санторини: греческий танец с разгоном — бузуки, с каждым кругом быстрее
+      bpm: 96, accel: 18, bpmMax: 168, voice: "trem", bass: "fifth", arp: true, drum: "light",
+      chords: [CH.Dm, CH.Dm, CH.A, CH.A, CH.Gm, CH.Dm, CH.A, CH.Dm],
       lead: [
-        [[0, 74, 2], [2, 77, 2], [4, 76, 2], [6, 74, 2], [8, 73, 2], [10, 74, 2], [12, 76, 2], [14, 77, 2]],
-        [[0, 79, 2], [2, 77, 2], [4, 76, 2], [6, 74, 2], [8, 70, 4], [12, 74, 2], [14, 79, 2]],
-        [[0, 76, 2], [2, 77, 1], [3, 76, 1], [4, 73, 2], [6, 76, 2], [8, 81, 4], [12, 79, 2], [14, 77, 2]],
-        [[0, 76, 2], [2, 74, 2], [4, 73, 2], [6, 76, 2], [8, 74, 6]],
-        [[0, 86, 2], [2, 84, 2], [4, 82, 2], [6, 81, 2], [8, 82, 2], [10, 81, 2], [12, 79, 2], [14, 77, 2]],
-        [[0, 79, 2], [2, 82, 2], [4, 79, 2], [6, 77, 2], [8, 74, 2], [10, 77, 2], [12, 79, 4]],
-        [[0, 81, 2], [2, 82, 1], [3, 81, 1], [4, 79, 2], [6, 77, 2], [8, 76, 2], [10, 77, 2], [12, 73, 2], [14, 76, 2]],
-        [[0, 74, 2], [2, 76, 2], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 74, 4]],
+        [[0, 69, 4], [4, 74, 2], [6, 74, 2], [8, 74, 2], [10, 76, 2], [12, 77, 4]],
+        [[0, 76, 2], [2, 74, 2], [4, 76, 2], [6, 77, 2], [8, 74, 8]],
+        [[0, 73, 2], [2, 74, 2], [4, 76, 2], [6, 77, 2], [8, 79, 2], [10, 77, 2], [12, 76, 4]],
+        [[0, 76, 2], [2, 77, 1], [3, 76, 1], [4, 73, 2], [6, 69, 2], [8, 69, 8]],
+        [[0, 79, 4], [4, 82, 2], [6, 81, 2], [8, 79, 2], [10, 77, 2], [12, 79, 4]],
+        [[0, 77, 2], [2, 76, 2], [4, 74, 2], [6, 77, 2], [8, 81, 4], [12, 77, 4]],
+        [[0, 76, 2], [2, 74, 2], [4, 73, 2], [6, 74, 2], [8, 76, 2], [10, 79, 2], [12, 77, 2], [14, 76, 2]],
+        [[0, 74, 4], [4, 69, 4], [8, 74, 8]],
       ],
     },
-    { // Ереван: дудук на фоне дама (бурдон на тонике), дхол
-      bpm: 104, voice: "duduk", bass: "drone", tonic: 38, arp: false, drum: "dhol", chords: [CH.Dm, CH.E, CH.C, CH.Dm],
+    { // Ереван: плясовая в духе Шалахо — зурна, дам, дхол, размер 6/8
+      bpm: 200, len: 12, voice: "zurna", bass: "drone", tonic: 45, arp: false, drum: "dhol68", chords: [CH.A],
       lead: [
-        [[0, 69, 4], [4, 71, 2], [6, 72, 2], [8, 74, 6], [14, 72, 2]],
-        [[0, 71, 2], [2, 68, 2], [4, 71, 4], [8, 69, 6], [14, 68, 2]],
-        [[0, 67, 2], [2, 69, 2], [4, 72, 4], [8, 71, 2], [10, 69, 2], [12, 67, 4]],
-        [[0, 69, 4], [4, 65, 2], [6, 67, 2], [8, 62, 8]],
-        [[0, 74, 2], [2, 76, 2], [4, 77, 4], [8, 76, 2], [10, 74, 2], [12, 76, 4]],
-        [[0, 80, 4], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 71, 4]],
-        [[0, 72, 2], [2, 74, 2], [4, 76, 4], [8, 74, 2], [10, 72, 2], [12, 71, 2], [14, 69, 2]],
-        [[0, 68, 2], [2, 69, 2], [4, 71, 2], [6, 68, 2], [8, 69, 8]],
+        [[0, 76, 2], [2, 77, 1], [3, 76, 1], [4, 74, 2], [6, 73, 2], [8, 74, 2], [10, 76, 2]],
+        [[0, 77, 2], [2, 76, 2], [4, 74, 2], [6, 73, 4], [10, 70, 2]],
+        [[0, 69, 2], [2, 70, 2], [4, 73, 2], [6, 74, 2], [8, 76, 2], [10, 77, 2]],
+        [[0, 76, 4], [4, 74, 2], [6, 76, 6]],
+        [[0, 81, 2], [2, 79, 2], [4, 77, 2], [6, 79, 2], [8, 77, 2], [10, 76, 2]],
+        [[0, 77, 2], [2, 76, 2], [4, 74, 2], [6, 76, 2], [8, 74, 2], [10, 73, 2]],
+        [[0, 74, 2], [2, 73, 2], [4, 70, 2], [6, 73, 2], [8, 74, 2], [10, 73, 2]],
+        [[0, 69, 6], [6, 69, 2], [8, 73, 2], [10, 76, 2]],
       ],
     },
-    { // Баку: лад шур — тар тремоло, нагара
-      bpm: 144, voice: "trem", bass: "fifth", arp: true, drum: "naghara", chords: [CH.Am, CH.Bb, CH.Am, CH.Gm, CH.Am, CH.Bb, CH.Gm, CH.Am],
+    { // Баку: бакинский джаз — свинг, саксофон с мугамными оборотами, шагающий бас, щётки
+      bpm: 120, swing: 0.33, voice: "sax", bass: "walk", arp: false, comp: true, drum: "jazz",
+      chords: [CH.Em7b5, CH.A7, CH.Dm7, CH.Dm7, CH.Gm7, CH.C7, CH.Fmaj7, CH.A7],
       lead: [
-        [[0, 69, 2], [2, 70, 2], [4, 72, 2], [6, 70, 1], [7, 69, 1], [8, 67, 2], [10, 69, 2], [12, 69, 4]],
-        [[0, 74, 2], [2, 72, 2], [4, 70, 2], [6, 72, 2], [8, 74, 4], [12, 77, 2], [14, 74, 2]],
-        [[0, 76, 2], [2, 74, 1], [3, 72, 1], [4, 70, 2], [6, 72, 2], [8, 69, 4], [12, 67, 2], [14, 69, 2]],
-        [[0, 70, 2], [2, 69, 2], [4, 67, 2], [6, 65, 2], [8, 67, 4], [12, 69, 4]],
-        [[0, 81, 2], [2, 82, 2], [4, 81, 1], [5, 79, 1], [6, 77, 2], [8, 76, 2], [10, 77, 2], [12, 79, 2], [14, 81, 2]],
-        [[0, 82, 4], [4, 81, 2], [6, 79, 2], [8, 77, 2], [10, 79, 2], [12, 74, 4]],
-        [[0, 74, 2], [2, 77, 2], [4, 79, 2], [6, 77, 1], [7, 74, 1], [8, 70, 2], [10, 72, 2], [12, 70, 2], [14, 72, 2]],
-        [[0, 70, 2], [2, 72, 2], [4, 70, 2], [6, 69, 2], [8, 69, 8]],
+        [[0, 74, 3], [3, 76, 1], [4, 77, 2], [6, 76, 2], [8, 74, 2], [10, 70, 2], [12, 72, 4]],
+        [[0, 73, 2], [2, 74, 1], [3, 73, 1], [4, 70, 2], [6, 69, 2], [8, 73, 4], [12, 76, 4]],
+        [[0, 77, 6], [6, 76, 2], [8, 74, 2], [10, 72, 2], [12, 74, 4]],
+        [[0, 81, 2], [2, 79, 2], [4, 77, 2], [6, 74, 2], [8, 77, 8]],
+        [[0, 79, 3], [3, 81, 1], [4, 82, 2], [6, 81, 2], [8, 79, 2], [10, 77, 2], [12, 74, 4]],
+        [[0, 76, 2], [2, 77, 1], [3, 76, 1], [4, 72, 2], [6, 70, 2], [8, 72, 4], [12, 76, 4]],
+        [[0, 77, 2], [2, 81, 2], [4, 84, 2], [6, 81, 2], [8, 77, 2], [10, 76, 2], [12, 74, 2], [14, 73, 2]],
+        [[0, 73, 4], [4, 76, 2], [6, 79, 2], [8, 81, 8]],
       ],
     },
-    { // Тбилиси: многоголосие квинтами, быстрая плясовая на доли
-      bpm: 160, voice: "fifths", bass: "pop", arp: false, drum: "doli", chords: [CH.G, CH.F, CH.C, CH.G],
+    { // Тбилиси: кавказский блатной шансон — аккордеон, «ум-па»
+      bpm: 116, voice: "accordion", bass: "oompah", arp: false, drum: "chanson",
+      chords: [CH.Am, CH.Dm, CH.G, CH.C, CH.Dm, CH.Am, CH.E, CH.Am],
       lead: [
-        [[0, 79, 2], [2, 79, 1], [3, 81, 1], [4, 83, 2], [6, 81, 2], [8, 79, 2], [10, 77, 2], [12, 79, 4]],
-        [[0, 77, 2], [2, 77, 1], [3, 79, 1], [4, 81, 2], [6, 79, 2], [8, 77, 2], [10, 76, 2], [12, 77, 4]],
-        [[0, 76, 2], [2, 79, 2], [4, 84, 2], [6, 83, 2], [8, 81, 2], [10, 79, 2], [12, 77, 2], [14, 76, 2]],
-        [[0, 74, 2], [2, 77, 2], [4, 79, 4], [8, 74, 2], [10, 71, 2], [12, 74, 4]],
-        [[0, 86, 2], [2, 84, 2], [4, 83, 2], [6, 84, 2], [8, 86, 2], [10, 83, 2], [12, 79, 4]],
-        [[0, 84, 2], [2, 81, 2], [4, 77, 2], [6, 81, 2], [8, 84, 2], [10, 81, 2], [12, 77, 4]],
-        [[0, 79, 1], [1, 81, 1], [2, 79, 2], [4, 76, 2], [6, 77, 2], [8, 79, 2], [10, 76, 2], [12, 72, 2], [14, 74, 2]],
-        [[0, 79, 4], [4, 74, 2], [6, 77, 2], [8, 79, 8]],
+        [[0, 69, 2], [2, 72, 2], [4, 76, 4], [8, 76, 2], [10, 74, 2], [12, 72, 2], [14, 71, 2]],
+        [[0, 74, 4], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 72, 2], [14, 74, 2]],
+        [[0, 71, 2], [2, 74, 2], [4, 79, 4], [8, 77, 2], [10, 76, 2], [12, 74, 2], [14, 72, 2]],
+        [[0, 72, 6], [6, 71, 2], [8, 72, 2], [10, 74, 2], [12, 76, 4]],
+        [[0, 77, 2], [2, 77, 2], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 72, 2], [14, 74, 2]],
+        [[0, 76, 2], [2, 76, 2], [4, 76, 2], [6, 74, 2], [8, 72, 4], [12, 69, 2], [14, 72, 2]],
+        [[0, 71, 4], [4, 68, 2], [6, 71, 2], [8, 74, 2], [10, 72, 2], [12, 71, 2], [14, 68, 2]],
+        [[0, 69, 8], [8, 64, 2], [10, 68, 2], [12, 71, 2], [14, 69, 2]],
       ],
     },
   ];
   const Music = {
-    step: 0, next: 0, timer: null, energy: 0, noise: null, theme: THEMES[0], pending: null,
+    step: 0, next: 0, loop: 0, timer: null, energy: 0, noise: null, theme: THEMES[0], pending: null,
     freq: (m) => 440 * Math.pow(2, (m - 69) / 12),
     init() {
       const c = Audio.ctx, n = Math.floor(c.sampleRate * 0.5);
@@ -349,7 +361,7 @@
     // тема региона; новая вступает с начала следующего такта
     setTheme(i) {
       const th = THEMES[i] || THEMES[0];
-      if (!this.timer) { this.theme = th; this.pending = null; this.step = 0; return; }
+      if (!this.timer) { this.theme = th; this.pending = null; this.step = 0; this.loop = 0; return; }
       this.pending = th === this.theme ? null : th;
     },
     // плотность аранжировки и приглушение — по состоянию игры
@@ -365,10 +377,12 @@
       if (!c || c.state !== "running") return;
       if (this.next < c.currentTime) this.next = c.currentTime + 0.03; // после сна вкладки не «догоняем»
       while (this.next < c.currentTime + 0.15) {
-        if (this.pending && !(this.step & 15)) { this.theme = this.pending; this.pending = null; this.step = 0; }
-        const sp = 60 / this.theme.bpm / 4;
+        const len = this.theme.len || 16;
+        if (this.pending && this.step % len === 0) { this.theme = this.pending; this.pending = null; this.step = 0; this.loop = 0; continue; }
+        const T = this.theme, bpm = T.accel ? Math.min(T.bpmMax, T.bpm + this.loop * T.accel) : T.bpm, sp = 60 / bpm / 4;
         if (Audio.vol.music > 0) this.playStep(this.step, this.next, sp);
-        this.next += sp; this.step = (this.step + 1) % 128;
+        this.next += sp; this.step = (this.step + 1) % (8 * len);
+        if (!this.step) this.loop++;
       }
     },
     osc(type, f, t, dur, vol, slide) {
@@ -388,30 +402,38 @@
       s.connect(fl); fl.connect(g); g.connect(Audio.musicBus);
       s.start(t, Math.random() * 0.3); s.stop(t + dur + 0.02);
     },
-    // дудук: мягкая атака, подъезд к ноте снизу и вибрато
-    duduk(f, t, dur) {
-      const c = Audio.ctx, o = c.createOscillator(), o2 = c.createOscillator(), fl = c.createBiquadFilter(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
-      o.type = "sawtooth"; o2.type = "triangle";
-      fl.type = "lowpass"; fl.frequency.value = 1500; fl.Q.value = 3;
-      lfo.frequency.value = 5.2; lg.gain.value = 14; lfo.connect(lg);
-      for (const x of [o, o2]) { x.frequency.setValueAtTime(f * 0.96, t); x.frequency.exponentialRampToValueAtTime(f, t + 0.07); lg.connect(x.detune); x.connect(fl); }
-      const a = Math.min(0.08, dur * 0.3), v = 0.1;
-      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + a);
-      g.gain.setValueAtTime(v, t + Math.max(a, dur - 0.1)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    // духовой голос: мягкая атака, подъезд к ноте и вибрато
+    wind(f, t, dur, w) {
+      const c = Audio.ctx, fl = c.createBiquadFilter(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain(), oscs = [];
+      fl.type = "lowpass"; fl.frequency.value = w.cut; fl.Q.value = 2;
+      lfo.frequency.value = 5.2; lg.gain.value = w.vib; lfo.connect(lg);
+      for (const type of w.waves) {
+        const o = c.createOscillator(); o.type = type;
+        o.frequency.setValueAtTime(f * w.bend, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.06);
+        lg.connect(o.detune); o.connect(fl); oscs.push(o);
+      }
+      const a = Math.min(w.att, dur * 0.3);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(w.v, t + a);
+      g.gain.setValueAtTime(w.v, t + Math.max(a, dur - 0.08)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       fl.connect(g); g.connect(Audio.musicBus);
-      for (const x of [o, o2, lfo]) { x.start(t); x.stop(t + dur + 0.02); }
+      for (const o of [...oscs, lfo]) { o.start(t); o.stop(t + dur + 0.02); }
     },
     lead(voice, n, t, dur, sp) {
-      const f = this.freq(n);
-      if (voice === "duduk") { this.duduk(f, t, Math.max(0.12, dur * 0.96)); return; }
-      if (voice === "trem") { // балалайка / бузуки / тар: быстрое тремоло
+      const f = this.freq(n), w = WINDS[voice];
+      if (w) {
+        const d = Math.max(0.1, dur * 0.95);
+        this.wind(f, t, d, w);
+        if (voice === "accordion") this.wind(f * 1.006, t, d, w); // «мюзет»: два чуть расстроенных язычка
+        if (voice === "flute") this.osc("square", f, t, dur * 0.9, 0.03); // синт-подклад под свирель
+        return;
+      }
+      if (voice === "trem") { // бузуки: быстрое тремоло
         for (let k = 0; k * sp * 0.5 < dur * 0.9; k++) this.osc("square", f, t + k * sp * 0.5, sp * 0.42, k ? 0.05 : 0.075);
         this.osc("triangle", f * 2, t, dur * 0.6, 0.025);
         return;
       }
       this.osc("square", f, t, dur * 0.92, 0.075);
       this.osc("triangle", f * 2, t, dur * 0.6, 0.03);
-      if (voice === "fifths") this.osc("square", this.freq(n - 7), t, dur * 0.92, 0.045); // второй голос квинтой ниже
     },
     drums(kind, bar, pos, t, hot) {
       const kick = () => this.osc("sine", 150, t, 0.16, 0.85, 42);
@@ -425,56 +447,64 @@
         if (pos === 0 || pos === 8 || (pos === 11 && (bar & 1)) || (pos === 6 && bar === 7)) kick();
         if (pos === 4 || pos === 12) snare();
         if (bar === 7 && pos >= 12) this.hiss(t, 0.06, 0.18, "bandpass", 2600); // сбивка перед повтором
-      } else if (kind === "polka") {
-        if (pos === 4 || pos === 12) hat(0.11);
+      } else if (kind === "edm") {
+        if ((pos & 3) === 2) hat(0.1);
         if (!hot) return;
-        if (pos === 0 || pos === 8) kick();
-        if (pos === 4 || pos === 12) snare(0.26);
-        if (bar === 7 && pos >= 12) snare(0.2);
+        if (!(pos & 3)) kick();
+        if (pos === 4 || pos === 12) { snare(0.3); this.hiss(t, 0.09, 0.2, "bandpass", 1200); }
+        if (bar === 7 && pos >= 8 && !(pos & 1)) snare(0.15 + (pos - 8) * 0.03);
       } else if (kind === "light") {
         if (!(pos & 1)) hat((pos & 3) === 2 ? 0.1 : 0.05);
         if (!hot) return;
         if (pos === 0 || pos === 8 || (pos === 10 && (bar & 1))) kick();
         if (pos === 4 || pos === 12) snare(0.22);
         if ((pos & 3) === 2) this.hiss(t, 0.08, 0.1, "bandpass", 6000); // бубен
-      } else if (kind === "dhol") {
-        if (!hot) { if (pos === 0) tom(110, 0.35); return; }
-        if (pos === 0 || pos === 6 || pos === 10) tom(110, 0.8);
-        if (pos === 3 || pos === 12 || pos === 14 || (bar === 7 && pos > 12)) slap(0.24);
-      } else if (kind === "naghara") {
-        if (!(pos & 1)) hat(0.05);
+      } else if (kind === "dhol68") { // 6/8
+        if (!hot) { if (pos === 0) tom(100, 0.35); return; }
+        if (pos === 0 || pos === 6 || (pos === 8 && (bar & 1))) tom(100, 0.85);
+        if (pos === 3 || pos === 4 || pos === 9 || pos === 10 || (bar === 7 && pos > 6)) slap(0.22);
+      } else if (kind === "jazz") {
+        if (pos === 0 || pos === 4 || pos === 6 || pos === 8 || pos === 12 || pos === 14) this.hiss(t, 0.22, hot ? 0.07 : 0.045, "highpass", 6000); // райд
         if (!hot) return;
-        if (pos === 0 || pos === 8) tom(105, 0.85);
-        if (pos === 6 || pos === 14) tom(170, 0.5);
-        if (pos === 3 || pos === 4 || pos === 11 || pos === 12 || (bar === 7 && pos >= 8)) slap(0.2);
-      } else if (kind === "doli") {
-        if (!(pos & 1)) hat(0.07);
+        if (pos === 4 || pos === 12) hat(0.09);
+        if (pos === 0 || pos === 8) this.osc("sine", 110, t, 0.12, 0.35, 50); // мягкая бочка
+        if (pos === 14 && (bar & 1)) this.hiss(t, 0.1, 0.12, "bandpass", 1500); // щётки
+      } else if (kind === "chanson") {
+        if (pos === 4 || pos === 12) hat(0.07);
         if (!hot) return;
-        if (pos === 0 || pos === 3 || pos === 8 || pos === 11) tom(120, 0.8);
-        if (pos === 4 || pos === 12) snare(0.28);
-        if (pos === 14 || (bar === 7 && pos >= 12)) slap(0.22);
+        if (pos === 0 || pos === 8) kick();
+        if (pos === 4 || pos === 12) snare(0.2);
+        if (pos === 14 && bar === 7) snare(0.18);
       }
     },
-    playStep(step, t, sp) {
-      const T = this.theme, bar = step >> 4, pos = step & 15, hot = this.energy > 0;
+    playStep(step, t0, sp) {
+      const T = this.theme, len = T.len || 16, bar = Math.floor(step / len), pos = step % len, hot = this.energy > 0;
+      const t = t0 + (T.swing && (pos & 3) === 2 ? sp * T.swing : 0); // свинг: слабые восьмые чуть позже
       const [root, chord] = T.chords[bar % T.chords.length];
       if (T.bass === "drone") { // дам: тянущийся бурдон на тонике
-        if (pos === 0) { this.osc("triangle", this.freq(T.tonic), t, sp * 16, 0.32); this.osc("sine", this.freq(T.tonic + 7), t, sp * 16, 0.12); }
+        if (pos === 0) { this.osc("triangle", this.freq(T.tonic), t, sp * len, 0.3); this.osc("sine", this.freq(T.tonic + 7), t, sp * len, 0.1); }
       } else if (T.bass === "oompah") { // «ум-па»: бас на сильные доли, аккорд на слабые
         if (pos === 0 || pos === 8) this.osc("triangle", this.freq(root + (pos === 8 ? 7 : 0)), t, sp * 2.2, 0.45);
         if (pos === 4 || pos === 12) for (const n of chord.slice(0, 3)) this.osc("square", this.freq(n), t, sp * 0.9, 0.03);
+      } else if (T.bass === "walk") { // шагающий бас четвертями с подходом к следующему аккорду
+        if (!(pos & 3)) {
+          const nx = T.chords[(bar + 1) % T.chords.length][0];
+          const n = [root, chord[1] - 12, chord[2] - 12, nx + (nx > root ? -1 : 1)][pos >> 2];
+          this.osc("triangle", this.freq(n), t, sp * 3.6, 0.5);
+        }
       } else if (!(pos & 1)) {
         const n = T.bass === "fifth" ? root + ((pos >> 1) & 1 ? 7 : 0) : root + (pos === 4 || pos === 10 || pos === 14 ? 12 : 0);
         this.osc("triangle", this.freq(n), t, sp * 1.7, 0.42);
         this.osc("square", this.freq(n), t, sp * 1.2, 0.035);
       }
+      if (T.comp && (pos === 6 || pos === 14)) for (const n of chord) this.osc("triangle", this.freq(n), t, sp * 1.6, 0.035); // фортепианные «уколы»
       if (T.arp) {
         const arp = [0, 1, 2, 3, 2, 1, 2, 3][pos & 7];
         this.osc("square", this.freq(chord[arp] + (hot && bar >= 4 ? 12 : 0)), t, sp * 0.8, hot ? 0.045 : 0.035);
       }
       this.drums(T.drum, bar, pos, t, hot);
       if (!hot) return;
-      for (const [p, n, len] of T.lead[bar]) if (p === pos) this.lead(T.voice, n, t, len * sp, sp);
+      for (const [p, n, len2] of T.lead[bar]) if (p === pos) this.lead(T.voice, n, t, len2 * sp, sp);
     },
   };
   const vibrate = (ms) => { if (navigator.vibrate) try { navigator.vibrate(ms); } catch {} };
