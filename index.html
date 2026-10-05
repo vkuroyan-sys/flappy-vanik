@@ -136,14 +136,14 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.2";
+  const VERSION = "1.3";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 76, pipeSpacing: 235, baseGap: 178, minGap: 148,
     birdHeight: 70, hitRadius: 22,
-    regionEvery: 10,  // смена региона (фона) каждые N труб
+    regionFrom: 6,    // до этого счёта — Зелёная долина, дальше случайные города
+    regionEvery: 10,  // смена города каждые N труб
     themeEvery: 20,   // смена времени суток каждые N очков
-    moveFrom: 30,     // с этого счёта трубы начинают двигаться
   };
   // Онлайн-таблица рекордов (Firebase Realtime Database, REST)
   const LB_DB = "https://flappy-vanik-default-rtdb.europe-west1.firebasedatabase.app";
@@ -246,21 +246,94 @@
     },
   };
 
-  // ---------- Фоновая музыка: свой чиптюн-луп (Am – F – C – G), 8 тактов ----------
+  // ---------- Фоновая музыка: у каждого региона своя тема (чиптюн на WebAudio), 8 тактов ----------
+  // мелодия: [позиция 16-й в такте, MIDI-нота, длина в 16-х]; аккорд: [бас, [4 ноты арпеджио]]
+  const CH = {
+    Am: [45, [57, 60, 64, 69]], Dm: [38, [57, 62, 65, 69]], E: [40, [56, 59, 64, 68]], Gm: [43, [58, 62, 67, 70]],
+    A: [45, [57, 61, 64, 69]], C: [48, [55, 60, 64, 67]], F: [41, [53, 57, 60, 65]], G: [43, [55, 59, 62, 67]], Bb: [46, [58, 62, 65, 70]],
+  };
+  const THEMES = [
+    { // Зелёная долина: Am – F – C – G
+      bpm: 140, voice: "chip", bass: "pop", arp: true, drum: "pop", chords: [CH.Am, CH.F, CH.C, CH.G],
+      lead: [
+        [[0, 76, 2], [2, 81, 2], [4, 79, 1], [5, 76, 1], [6, 74, 2], [8, 76, 4], [12, 72, 2], [14, 74, 2]],
+        [[0, 72, 2], [2, 77, 2], [4, 76, 1], [5, 72, 1], [6, 69, 2], [8, 72, 4], [12, 69, 2], [14, 72, 2]],
+        [[0, 67, 2], [2, 72, 2], [4, 76, 2], [6, 79, 2], [8, 76, 2], [10, 72, 2], [12, 74, 2], [14, 76, 2]],
+        [[0, 74, 2], [2, 71, 2], [4, 67, 2], [6, 71, 2], [8, 74, 6]],
+        [[0, 81, 3], [3, 79, 1], [4, 76, 2], [6, 79, 2], [8, 81, 2], [10, 84, 2], [12, 83, 2], [14, 79, 2]],
+        [[0, 81, 3], [3, 79, 1], [4, 77, 2], [6, 76, 2], [8, 77, 2], [10, 81, 2], [12, 79, 2], [14, 77, 2]],
+        [[0, 76, 2], [2, 79, 2], [4, 84, 4], [8, 83, 2], [10, 79, 2], [12, 76, 2], [14, 79, 2]],
+        [[0, 83, 2], [2, 81, 2], [4, 79, 2], [6, 74, 2], [8, 79, 4], [12, 71, 2], [14, 74, 2]],
+      ],
+    },
+    { // Москва: русская плясовая — балалайка тремоло, «ум-па»
+      bpm: 150, voice: "trem", bass: "oompah", arp: false, drum: "polka", chords: [CH.Am, CH.Dm, CH.E, CH.Am],
+      lead: [
+        [[0, 76, 2], [2, 76, 2], [4, 74, 2], [6, 72, 2], [8, 71, 2], [10, 72, 2], [12, 69, 4]],
+        [[0, 74, 2], [2, 74, 2], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 72, 2], [14, 74, 2]],
+        [[0, 76, 3], [3, 74, 1], [4, 72, 2], [6, 71, 2], [8, 68, 2], [10, 71, 2], [12, 76, 4]],
+        [[0, 72, 2], [2, 71, 2], [4, 69, 4], [8, 64, 2], [10, 69, 2], [12, 69, 4]],
+        [[0, 81, 1], [1, 81, 1], [2, 81, 2], [4, 79, 1], [5, 77, 1], [6, 76, 2], [8, 77, 1], [9, 76, 1], [10, 74, 2], [12, 72, 4]],
+        [[0, 74, 1], [1, 74, 1], [2, 77, 2], [4, 81, 2], [6, 77, 2], [8, 74, 2], [10, 77, 2], [12, 74, 4]],
+        [[0, 80, 2], [2, 83, 2], [4, 80, 2], [6, 76, 2], [8, 74, 2], [10, 71, 2], [12, 68, 2], [14, 71, 2]],
+        [[0, 69, 2], [2, 72, 2], [4, 76, 2], [6, 72, 2], [8, 69, 4], [12, 69, 4]],
+      ],
+    },
+    { // Санторини: греческий танец — бузуки, бубен
+      bpm: 132, voice: "trem", bass: "fifth", arp: true, drum: "light", chords: [CH.Dm, CH.Gm, CH.A, CH.Dm],
+      lead: [
+        [[0, 74, 2], [2, 77, 2], [4, 76, 2], [6, 74, 2], [8, 73, 2], [10, 74, 2], [12, 76, 2], [14, 77, 2]],
+        [[0, 79, 2], [2, 77, 2], [4, 76, 2], [6, 74, 2], [8, 70, 4], [12, 74, 2], [14, 79, 2]],
+        [[0, 76, 2], [2, 77, 1], [3, 76, 1], [4, 73, 2], [6, 76, 2], [8, 81, 4], [12, 79, 2], [14, 77, 2]],
+        [[0, 76, 2], [2, 74, 2], [4, 73, 2], [6, 76, 2], [8, 74, 6]],
+        [[0, 86, 2], [2, 84, 2], [4, 82, 2], [6, 81, 2], [8, 82, 2], [10, 81, 2], [12, 79, 2], [14, 77, 2]],
+        [[0, 79, 2], [2, 82, 2], [4, 79, 2], [6, 77, 2], [8, 74, 2], [10, 77, 2], [12, 79, 4]],
+        [[0, 81, 2], [2, 82, 1], [3, 81, 1], [4, 79, 2], [6, 77, 2], [8, 76, 2], [10, 77, 2], [12, 73, 2], [14, 76, 2]],
+        [[0, 74, 2], [2, 76, 2], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 74, 4]],
+      ],
+    },
+    { // Ереван: дудук на фоне дама (бурдон на тонике), дхол
+      bpm: 104, voice: "duduk", bass: "drone", tonic: 38, arp: false, drum: "dhol", chords: [CH.Dm, CH.E, CH.C, CH.Dm],
+      lead: [
+        [[0, 69, 4], [4, 71, 2], [6, 72, 2], [8, 74, 6], [14, 72, 2]],
+        [[0, 71, 2], [2, 68, 2], [4, 71, 4], [8, 69, 6], [14, 68, 2]],
+        [[0, 67, 2], [2, 69, 2], [4, 72, 4], [8, 71, 2], [10, 69, 2], [12, 67, 4]],
+        [[0, 69, 4], [4, 65, 2], [6, 67, 2], [8, 62, 8]],
+        [[0, 74, 2], [2, 76, 2], [4, 77, 4], [8, 76, 2], [10, 74, 2], [12, 76, 4]],
+        [[0, 80, 4], [4, 77, 2], [6, 76, 2], [8, 74, 4], [12, 71, 4]],
+        [[0, 72, 2], [2, 74, 2], [4, 76, 4], [8, 74, 2], [10, 72, 2], [12, 71, 2], [14, 69, 2]],
+        [[0, 68, 2], [2, 69, 2], [4, 71, 2], [6, 68, 2], [8, 69, 8]],
+      ],
+    },
+    { // Баку: лад шур — тар тремоло, нагара
+      bpm: 144, voice: "trem", bass: "fifth", arp: true, drum: "naghara", chords: [CH.Am, CH.Bb, CH.Am, CH.Gm, CH.Am, CH.Bb, CH.Gm, CH.Am],
+      lead: [
+        [[0, 69, 2], [2, 70, 2], [4, 72, 2], [6, 70, 1], [7, 69, 1], [8, 67, 2], [10, 69, 2], [12, 69, 4]],
+        [[0, 74, 2], [2, 72, 2], [4, 70, 2], [6, 72, 2], [8, 74, 4], [12, 77, 2], [14, 74, 2]],
+        [[0, 76, 2], [2, 74, 1], [3, 72, 1], [4, 70, 2], [6, 72, 2], [8, 69, 4], [12, 67, 2], [14, 69, 2]],
+        [[0, 70, 2], [2, 69, 2], [4, 67, 2], [6, 65, 2], [8, 67, 4], [12, 69, 4]],
+        [[0, 81, 2], [2, 82, 2], [4, 81, 1], [5, 79, 1], [6, 77, 2], [8, 76, 2], [10, 77, 2], [12, 79, 2], [14, 81, 2]],
+        [[0, 82, 4], [4, 81, 2], [6, 79, 2], [8, 77, 2], [10, 79, 2], [12, 74, 4]],
+        [[0, 74, 2], [2, 77, 2], [4, 79, 2], [6, 77, 1], [7, 74, 1], [8, 70, 2], [10, 72, 2], [12, 70, 2], [14, 72, 2]],
+        [[0, 70, 2], [2, 72, 2], [4, 70, 2], [6, 69, 2], [8, 69, 8]],
+      ],
+    },
+    { // Тбилиси: многоголосие квинтами, быстрая плясовая на доли
+      bpm: 160, voice: "fifths", bass: "pop", arp: false, drum: "doli", chords: [CH.G, CH.F, CH.C, CH.G],
+      lead: [
+        [[0, 79, 2], [2, 79, 1], [3, 81, 1], [4, 83, 2], [6, 81, 2], [8, 79, 2], [10, 77, 2], [12, 79, 4]],
+        [[0, 77, 2], [2, 77, 1], [3, 79, 1], [4, 81, 2], [6, 79, 2], [8, 77, 2], [10, 76, 2], [12, 77, 4]],
+        [[0, 76, 2], [2, 79, 2], [4, 84, 2], [6, 83, 2], [8, 81, 2], [10, 79, 2], [12, 77, 2], [14, 76, 2]],
+        [[0, 74, 2], [2, 77, 2], [4, 79, 4], [8, 74, 2], [10, 71, 2], [12, 74, 4]],
+        [[0, 86, 2], [2, 84, 2], [4, 83, 2], [6, 84, 2], [8, 86, 2], [10, 83, 2], [12, 79, 4]],
+        [[0, 84, 2], [2, 81, 2], [4, 77, 2], [6, 81, 2], [8, 84, 2], [10, 81, 2], [12, 77, 4]],
+        [[0, 79, 1], [1, 81, 1], [2, 79, 2], [4, 76, 2], [6, 77, 2], [8, 79, 2], [10, 76, 2], [12, 72, 2], [14, 74, 2]],
+        [[0, 79, 4], [4, 74, 2], [6, 77, 2], [8, 79, 8]],
+      ],
+    },
+  ];
   const Music = {
-    bpm: 140, step: 0, next: 0, timer: null, energy: 0, noise: null,
-    // мелодия: [позиция 16-й в такте, MIDI-нота, длина в 16-х]
-    LEAD: [
-      [[0, 76, 2], [2, 81, 2], [4, 79, 1], [5, 76, 1], [6, 74, 2], [8, 76, 4], [12, 72, 2], [14, 74, 2]],
-      [[0, 72, 2], [2, 77, 2], [4, 76, 1], [5, 72, 1], [6, 69, 2], [8, 72, 4], [12, 69, 2], [14, 72, 2]],
-      [[0, 67, 2], [2, 72, 2], [4, 76, 2], [6, 79, 2], [8, 76, 2], [10, 72, 2], [12, 74, 2], [14, 76, 2]],
-      [[0, 74, 2], [2, 71, 2], [4, 67, 2], [6, 71, 2], [8, 74, 6]],
-      [[0, 81, 3], [3, 79, 1], [4, 76, 2], [6, 79, 2], [8, 81, 2], [10, 84, 2], [12, 83, 2], [14, 79, 2]],
-      [[0, 81, 3], [3, 79, 1], [4, 77, 2], [6, 76, 2], [8, 77, 2], [10, 81, 2], [12, 79, 2], [14, 77, 2]],
-      [[0, 76, 2], [2, 79, 2], [4, 84, 4], [8, 83, 2], [10, 79, 2], [12, 76, 2], [14, 79, 2]],
-      [[0, 83, 2], [2, 81, 2], [4, 79, 2], [6, 74, 2], [8, 79, 4], [12, 71, 2], [14, 74, 2]],
-    ],
-    CHORDS: [[45, [57, 60, 64, 69]], [41, [53, 57, 60, 65]], [48, [55, 60, 64, 67]], [43, [55, 59, 62, 67]]],
+    step: 0, next: 0, timer: null, energy: 0, noise: null, theme: THEMES[0], pending: null,
     freq: (m) => 440 * Math.pow(2, (m - 69) / 12),
     init() {
       const c = Audio.ctx, n = Math.floor(c.sampleRate * 0.5);
@@ -273,6 +346,12 @@
       this.next = Audio.ctx.currentTime + 0.1;
       this.timer = setInterval(() => this.tick(), 25);
     },
+    // тема региона; новая вступает с начала следующего такта
+    setTheme(i) {
+      const th = THEMES[i] || THEMES[0];
+      if (!this.timer) { this.theme = th; this.pending = null; this.step = 0; return; }
+      this.pending = th === this.theme ? null : th;
+    },
     // плотность аранжировки и приглушение — по состоянию игры
     setMood(state) {
       if (!Audio.ctx) return;
@@ -284,9 +363,10 @@
     tick() {
       const c = Audio.ctx;
       if (!c || c.state !== "running") return;
-      const sp = 60 / this.bpm / 4;
-      if (this.next < c.currentTime) this.next = c.currentTime + 0.03;   // после сна вкладки не «догоняем»
+      if (this.next < c.currentTime) this.next = c.currentTime + 0.03; // после сна вкладки не «догоняем»
       while (this.next < c.currentTime + 0.15) {
+        if (this.pending && !(this.step & 15)) { this.theme = this.pending; this.pending = null; this.step = 0; }
+        const sp = 60 / this.theme.bpm / 4;
         if (Audio.vol.music > 0) this.playStep(this.step, this.next, sp);
         this.next += sp; this.step = (this.step + 1) % 128;
       }
@@ -308,30 +388,93 @@
       s.connect(fl); fl.connect(g); g.connect(Audio.musicBus);
       s.start(t, Math.random() * 0.3); s.stop(t + dur + 0.02);
     },
+    // дудук: мягкая атака, подъезд к ноте снизу и вибрато
+    duduk(f, t, dur) {
+      const c = Audio.ctx, o = c.createOscillator(), o2 = c.createOscillator(), fl = c.createBiquadFilter(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain();
+      o.type = "sawtooth"; o2.type = "triangle";
+      fl.type = "lowpass"; fl.frequency.value = 1500; fl.Q.value = 3;
+      lfo.frequency.value = 5.2; lg.gain.value = 14; lfo.connect(lg);
+      for (const x of [o, o2]) { x.frequency.setValueAtTime(f * 0.96, t); x.frequency.exponentialRampToValueAtTime(f, t + 0.07); lg.connect(x.detune); x.connect(fl); }
+      const a = Math.min(0.08, dur * 0.3), v = 0.1;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + a);
+      g.gain.setValueAtTime(v, t + Math.max(a, dur - 0.1)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      fl.connect(g); g.connect(Audio.musicBus);
+      for (const x of [o, o2, lfo]) { x.start(t); x.stop(t + dur + 0.02); }
+    },
+    lead(voice, n, t, dur, sp) {
+      const f = this.freq(n);
+      if (voice === "duduk") { this.duduk(f, t, Math.max(0.12, dur * 0.96)); return; }
+      if (voice === "trem") { // балалайка / бузуки / тар: быстрое тремоло
+        for (let k = 0; k * sp * 0.5 < dur * 0.9; k++) this.osc("square", f, t + k * sp * 0.5, sp * 0.42, k ? 0.05 : 0.075);
+        this.osc("triangle", f * 2, t, dur * 0.6, 0.025);
+        return;
+      }
+      this.osc("square", f, t, dur * 0.92, 0.075);
+      this.osc("triangle", f * 2, t, dur * 0.6, 0.03);
+      if (voice === "fifths") this.osc("square", this.freq(n - 7), t, dur * 0.92, 0.045); // второй голос квинтой ниже
+    },
+    drums(kind, bar, pos, t, hot) {
+      const kick = () => this.osc("sine", 150, t, 0.16, 0.85, 42);
+      const snare = (v = 0.32) => { this.hiss(t, 0.12, v, "bandpass", 1900); this.osc("triangle", 190, t, 0.07, v * 0.7); };
+      const hat = (v) => this.hiss(t, 0.035, v, "highpass", 7500);
+      const tom = (f, v) => this.osc("sine", f, t, 0.22, v, f * 0.5);
+      const slap = (v) => { this.hiss(t, 0.05, v, "bandpass", 3200); this.osc("triangle", 330, t, 0.04, v * 0.5); };
+      if (kind === "pop") {
+        if (!(pos & 1) || (hot && bar >= 4)) hat((pos & 3) === 2 ? 0.12 : 0.07);
+        if (!hot) return;
+        if (pos === 0 || pos === 8 || (pos === 11 && (bar & 1)) || (pos === 6 && bar === 7)) kick();
+        if (pos === 4 || pos === 12) snare();
+        if (bar === 7 && pos >= 12) this.hiss(t, 0.06, 0.18, "bandpass", 2600); // сбивка перед повтором
+      } else if (kind === "polka") {
+        if (pos === 4 || pos === 12) hat(0.11);
+        if (!hot) return;
+        if (pos === 0 || pos === 8) kick();
+        if (pos === 4 || pos === 12) snare(0.26);
+        if (bar === 7 && pos >= 12) snare(0.2);
+      } else if (kind === "light") {
+        if (!(pos & 1)) hat((pos & 3) === 2 ? 0.1 : 0.05);
+        if (!hot) return;
+        if (pos === 0 || pos === 8 || (pos === 10 && (bar & 1))) kick();
+        if (pos === 4 || pos === 12) snare(0.22);
+        if ((pos & 3) === 2) this.hiss(t, 0.08, 0.1, "bandpass", 6000); // бубен
+      } else if (kind === "dhol") {
+        if (!hot) { if (pos === 0) tom(110, 0.35); return; }
+        if (pos === 0 || pos === 6 || pos === 10) tom(110, 0.8);
+        if (pos === 3 || pos === 12 || pos === 14 || (bar === 7 && pos > 12)) slap(0.24);
+      } else if (kind === "naghara") {
+        if (!(pos & 1)) hat(0.05);
+        if (!hot) return;
+        if (pos === 0 || pos === 8) tom(105, 0.85);
+        if (pos === 6 || pos === 14) tom(170, 0.5);
+        if (pos === 3 || pos === 4 || pos === 11 || pos === 12 || (bar === 7 && pos >= 8)) slap(0.2);
+      } else if (kind === "doli") {
+        if (!(pos & 1)) hat(0.07);
+        if (!hot) return;
+        if (pos === 0 || pos === 3 || pos === 8 || pos === 11) tom(120, 0.8);
+        if (pos === 4 || pos === 12) snare(0.28);
+        if (pos === 14 || (bar === 7 && pos >= 12)) slap(0.22);
+      }
+    },
     playStep(step, t, sp) {
-      const bar = step >> 4, pos = step & 15, [root, chord] = this.CHORDS[bar & 3], hot = this.energy > 0;
-      // бас: восьмые с октавными скачками
-      if (!(pos & 1)) {
-        const oct = pos === 4 || pos === 10 || pos === 14;
-        this.osc("triangle", this.freq(root + (oct ? 12 : 0)), t, sp * 1.7, 0.42);
-        this.osc("square", this.freq(root + (oct ? 12 : 0)), t, sp * 1.2, 0.035);
+      const T = this.theme, bar = step >> 4, pos = step & 15, hot = this.energy > 0;
+      const [root, chord] = T.chords[bar % T.chords.length];
+      if (T.bass === "drone") { // дам: тянущийся бурдон на тонике
+        if (pos === 0) { this.osc("triangle", this.freq(T.tonic), t, sp * 16, 0.32); this.osc("sine", this.freq(T.tonic + 7), t, sp * 16, 0.12); }
+      } else if (T.bass === "oompah") { // «ум-па»: бас на сильные доли, аккорд на слабые
+        if (pos === 0 || pos === 8) this.osc("triangle", this.freq(root + (pos === 8 ? 7 : 0)), t, sp * 2.2, 0.45);
+        if (pos === 4 || pos === 12) for (const n of chord.slice(0, 3)) this.osc("square", this.freq(n), t, sp * 0.9, 0.03);
+      } else if (!(pos & 1)) {
+        const n = T.bass === "fifth" ? root + ((pos >> 1) & 1 ? 7 : 0) : root + (pos === 4 || pos === 10 || pos === 14 ? 12 : 0);
+        this.osc("triangle", this.freq(n), t, sp * 1.7, 0.42);
+        this.osc("square", this.freq(n), t, sp * 1.2, 0.035);
       }
-      // арпеджио шестнадцатыми
-      const arp = [0, 1, 2, 3, 2, 1, 2, 3][pos & 7];
-      this.osc("square", this.freq(chord[arp] + (hot && bar >= 4 ? 12 : 0)), t, sp * 0.8, hot ? 0.045 : 0.035);
-      // хэт
-      if (!(pos & 1) || (hot && bar >= 4)) this.hiss(t, 0.035, (pos & 3) === 2 ? 0.12 : 0.07, "highpass", 7500);
+      if (T.arp) {
+        const arp = [0, 1, 2, 3, 2, 1, 2, 3][pos & 7];
+        this.osc("square", this.freq(chord[arp] + (hot && bar >= 4 ? 12 : 0)), t, sp * 0.8, hot ? 0.045 : 0.035);
+      }
+      this.drums(T.drum, bar, pos, t, hot);
       if (!hot) return;
-      // бочка и малый
-      if (pos === 0 || pos === 8 || (pos === 11 && (bar & 1)) || (pos === 6 && bar === 7)) this.osc("sine", 150, t, 0.16, 0.85, 42);
-      if (pos === 4 || pos === 12) { this.hiss(t, 0.12, 0.32, "bandpass", 1900); this.osc("triangle", 190, t, 0.07, 0.22); }
-      if (bar === 7 && pos >= 12) this.hiss(t, 0.06, 0.18, "bandpass", 2600);   // сбивка перед повтором
-      // мелодия
-      for (const [p, n, len] of this.LEAD[bar]) {
-        if (p !== pos) continue;
-        this.osc("square", this.freq(n), t, len * sp * 0.92, 0.075);
-        this.osc("triangle", this.freq(n + 12), t, len * sp * 0.6, 0.03);
-      }
+      for (const [p, n, len] of T.lead[bar]) if (p === pos) this.lead(T.voice, n, t, len * sp, sp);
     },
   };
   const vibrate = (ms) => { if (navigator.vibrate) try { navigator.vibrate(ms); } catch {} };
@@ -440,6 +583,8 @@
     { name: "МОСКВА", clouds: false },
     { name: "САНТОРИНИ", clouds: false },
     { name: "ЕРЕВАН", clouds: true },
+    { name: "БАКУ", clouds: false },
+    { name: "ТБИЛИСИ", clouds: true },
   ];
   const seeded = (s) => () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
   // Затемнённые под закат/ночь копии слоёв: строятся один раз при смене времени суток, а не каждый кадр
@@ -653,6 +798,145 @@
     }
   }
 
+  function paintBakuFar(R, cw, hc) {
+    const A = "#A3B6CE", B = "#8FA4C0", WIN = "#C6D5E6", rnd = seeded(17);
+    const hill = (x) => Math.round(9 + 4 * Math.sin(2 * Math.PI * x / cw + 0.8) + 2 * Math.sin(6 * Math.PI * x / cw));
+    for (let x = 0; x < cw; x++) { const h = hill(x); R("#9AA8BC", x, hc - h, 1, h); }
+    // город на склонах
+    for (let x = 0; x < cw;) {
+      const w = 4 + Math.floor(rnd() * 6), h = 4 + Math.floor(rnd() * 9), base = hc - hill(x) + 3;
+      R(rnd() < 0.5 ? A : B, x, base - h, w, h);
+      for (let yy = base - h + 1; yy < base - 1; yy += 2) for (let xx = x + 1; xx < x + w - 1; xx += 2) if (rnd() < 0.45) R(WIN, xx, yy);
+      x += w + (rnd() < 0.3 ? 1 : 0);
+    }
+    // телебашня
+    const tv = Math.round(cw * 0.12), tb = hc - hill(tv);
+    R(B, tv - 1, tb - 40, 2, 40); R(A, tv - 3, tb - 30, 6, 3); R(WIN, tv - 2, tb - 29, 4, 1); R(B, tv, tb - 46, 1, 6);
+    // Пламенные башни
+    const fx = Math.round(cw * 0.62), fb = hc - hill(fx) + 1;
+    const flame = (cx, h, w, lean) => {
+      for (let i = 0; i < h; i++) {
+        const f = i / h, ww = Math.max(1, Math.round(w * (1 - f * f * 0.85))), x0 = cx - (ww >> 1) + Math.round(lean * f * f * 3);
+        R(i % 3 ? "#6F95C9" : "#8DB0DD", x0, fb - 1 - i, ww, 1);
+        R("#557BB0", x0 + ww - 1, fb - 1 - i);
+        if (i % 3 === 1 && rnd() < 0.5) R("#F2A65A", x0 + Math.floor(rnd() * ww), fb - 1 - i); // огни
+      }
+    };
+    flame(fx - 10, 30, 9, -1);
+    flame(fx + 10, 27, 9, 1);
+    flame(fx, 40, 10, 0.6);
+  }
+
+  function paintBakuNear(R, cw, hc) {
+    const S = "#D9B57C", SD = "#B8925A", SL = "#EDCF98", DK = "#5E4126", rnd = seeded(23);
+    // крепостная стена Ичеришехер
+    const wt = hc - 10;
+    R(S, 0, wt, cw, 10); R(SD, 0, wt, cw, 1);
+    for (let y = wt + 3; y < hc; y += 3) R(SD, 0, y, cw, 1);
+    for (let y = wt + 1; y < hc; y += 3) for (let x = (Math.floor(y / 3) & 1) * 3; x < cw; x += 6) R(SD, x, y, 1, 2);
+    for (let x = 0; x + 2 <= cw; x += 4) { R(S, x, wt - 2, 2, 2); R(SL, x, wt - 2, 2, 1); }
+    const bastion = (cx) => {
+      R(S, cx - 3, wt - 5, 7, 15); R(SL, cx - 3, wt - 5, 2, 15); R(SD, cx + 3, wt - 5, 1, 15);
+      for (let x = cx - 3; x <= cx + 3; x += 2) R(SL, x, wt - 6);
+    };
+    bastion(Math.round(cw * 0.06)); bastion(Math.round(cw * 0.56)); bastion(Math.round(cw * 0.95));
+    // Девичья башня
+    const mx = Math.round(cw * 0.3), mh = 34, top = hc - mh;
+    for (let c = 0; c < 13; c++) R(c < 3 ? SL : c < 9 ? S : SD, mx - 6 + c, top, 1, mh);
+    for (let y = top + 3; y < hc; y += 3) R("#C9A46C", mx - 6, y, 13, 1);
+    R(S, mx + 7, top + 6, 3, mh - 6); R(SD, mx + 9, top + 6, 1, mh - 6); R(SL, mx + 7, top + 6, 3, 1); // выступ
+    R(SL, mx - 7, top - 1, 15, 2); R(SD, mx - 7, top, 15, 1);
+    for (const [dx, dy] of [[0, 6], [-3, 14], [2, 21], [-1, 27]]) R(DK, mx + dx, top + dy, 1, 2); // бойницы
+    R(DK, mx - 1, hc - 4, 3, 4);
+    // дворец Ширваншахов: купол и минарет
+    const q = Math.round(cw * 0.76);
+    R(S, q - 5, hc - 17, 11, 7); R(SD, q + 5, hc - 17, 1, 7); R(DK, q - 1, hc - 14, 3, 4);
+    [5, 5, 4, 4, 3, 2].forEach((k, i) => R(i < 2 ? S : SL, q - k, hc - 18 - i, 2 * k + 1, 1));
+    R(SD, q, hc - 24);
+    const mn = q + 8;
+    R(S, mn - 1, hc - 30, 3, 20); R(SD, mn + 1, hc - 30, 1, 20); R(SL, mn - 2, hc - 24, 5, 1); R(SD, mn - 2, hc - 23, 5, 1);
+    R(SL, mn - 1, hc - 31, 3, 1); R(SL, mn, hc - 33, 1, 2);
+    // пальмы бульвара
+    for (const f of [0.17, 0.45, 0.66, 0.88]) {
+      const x = Math.round(cw * f), h = 9 + Math.floor(rnd() * 4), ty = hc - h;
+      R("#7A5A3A", x, ty, 1, h);
+      R("#3E8E41", x - 3, ty - 1, 7, 1); R("#3E8E41", x - 1, ty - 2, 3, 1);
+      R("#2F6E33", x - 4, ty, 2, 1); R("#2F6E33", x + 3, ty, 2, 1); R("#2F6E33", x - 5, ty + 1); R("#2F6E33", x + 5, ty + 1);
+    }
+  }
+
+  function paintTbilisiFar(R, cw, hc) {
+    const wrap = (x, p) => { const d = x - p; return ((d % cw) + cw * 1.5) % cw - cw / 2; };
+    const M = (x) => 8 + 2 * Math.sin(6 * Math.PI * x / cw) + 22 * Math.pow(Math.max(0, 1 - Math.abs(wrap(x, cw * 0.8)) / 30), 1.3); // Мтацминда
+    const N = (x) => 22 * Math.pow(Math.max(0, 1 - Math.abs(wrap(x, cw * 0.22)) / 24), 1.1); // скала Нарикалы
+    const ground = (x) => Math.round(Math.max(M(x), N(x)));
+    for (let x = 0; x < cw; x++) {
+      const m = Math.round(M(x)), n = Math.round(N(x));
+      if (m >= n) { R("#8FA79C", x, hc - m, 1, m); R("#A3BAB0", x, hc - m); }
+      else { R("#A39A8C", x, hc - n, 1, n); R("#B7AE9F", x, hc - n); }
+    }
+    // крепость Нарикала по гребню
+    const nk = Math.round(cw * 0.22), nt = (x) => hc - ground(x);
+    for (let x = nk - 12; x <= nk + 9; x++) { const y = nt(x); R("#BBA98E", x, y - 3, 1, 3); if (!(x & 1)) R("#BBA98E", x, y - 4); }
+    for (const dx of [-12, -4, 6]) { const x = nk + dx, y = nt(x); R("#C8B79B", x - 1, y - 7, 3, 7); R("#BBA98E", x - 1, y - 8); R("#BBA98E", x + 1, y - 8); }
+    // Мать Грузии
+    const mg = nk + 13, my = nt(mg), ST = "#D5DAE2";
+    R(ST, mg - 1, my - 3, 3, 3); R(ST, mg, my - 11, 1, 8); R(ST, mg - 1, my - 9, 3, 4);
+    R(ST, mg - 3, my - 9, 2, 1); R(ST, mg + 2, my - 9, 2, 1); R(ST, mg - 3, my - 12, 1, 3); R(ST, mg + 3, my - 10, 1, 2);
+    // собор Цминда Самеба
+    const sb = Math.round(cw * 0.5), sbb = hc - ground(sb) + 1;
+    R("#D9C9A9", sb - 7, sbb - 7, 15, 7); R("#C2B190", sb + 7, sbb - 7, 1, 7);
+    R("#D9C9A9", sb - 4, sbb - 13, 9, 6); R("#E6D8BC", sb - 4, sbb - 13, 9, 1);
+    R("#D9C9A9", sb - 2, sbb - 18, 5, 5); R("#B39F7F", sb - 1, sbb - 17, 1, 2); R("#B39F7F", sb + 1, sbb - 17, 1, 2);
+    [2, 2, 1, 1, 0].forEach((k, i) => R(i & 1 ? "#E9C45A" : "#D7A93C", sb - k, sbb - 19 - i, 2 * k + 1, 1));
+    R("#E9C45A", sb, sbb - 26, 1, 2); R("#E9C45A", sb - 1, sbb - 25, 3, 1);
+    // телебашня на Мтацминде
+    const tx = Math.round(cw * 0.8), tb = hc - ground(tx) + 1, th = 22;
+    for (let i = 0; i < th; i++) {
+      const k = Math.round(3 * (1 - i / th)), y = tb - 1 - i, col = Math.floor(i / 4) % 2 ? "#EDE6DC" : "#C8524A";
+      R(col, tx - k, y); R(col, tx + k, y); if (i % 4 === 0) R(col, tx - k, y, 2 * k + 1, 1);
+    }
+    R("#C8524A", tx, tb - th - 5, 1, 5);
+  }
+
+  function paintTbilisiNear(R, cw, hc) {
+    const rnd = seeded(31), WALL = ["#EADBC0", "#DDBE9C", "#CFA07E", "#E9D3AE", "#C9B8A0"], BAL = ["#3E7D5A", "#3B6E9E", "#7A4E2D", "#4F8C8A"], ROOF = "#8C3B2E";
+    const bank = hc - 4;
+    // Кура
+    R("#5C8F8A", 0, bank, cw, 4);
+    for (let i = 0; i < 18; i++) R("#86B5AE", Math.floor(rnd() * (cw - 3)), bank + 1 + Math.floor(rnd() * 3), 2 + Math.floor(rnd() * 3), 1);
+    // старые дома с резными деревянными балконами
+    const house = (x, w) => {
+      const h = 11 + Math.floor(rnd() * 9), y0 = bank - h, bal = BAL[Math.floor(rnd() * BAL.length)];
+      R(WALL[Math.floor(rnd() * WALL.length)], x, y0, w, h); R("#00000022", x + w - 1, y0, 1, h);
+      R(ROOF, x - 1, y0 - 1, w + 2, 1); R(ROOF, x, y0 - 2, w, 1); R("#A84E3C", x + 1, y0 - 3, w - 2, 1);
+      for (let xx = x + 1; xx < x + w - 1; xx += 2) { R("#4A3A33", xx, y0 + 2, 1, 2); R("#4A3A33", xx, bank - 4, 1, 3); }
+      const by = y0 + 5;
+      R(bal, x, by, w, 4); R("#F1E6D2", x, by, w, 1);
+      for (let xx = x + 1; xx < x + w; xx += 2) R("#F1E6D2", xx, by + 2);
+      R(bal, x, by + 4, 1, 3); R(bal, x + w - 1, by + 4, 1, 3);
+    };
+    const row = (x0, x1) => { for (let x = x0; x < x1 - 4;) { const w = Math.min(x1 - x, 6 + Math.floor(rnd() * 5)); house(x, w); x += w + 1; } };
+    // Мост Мира
+    const bx = Math.round(cw * 0.36), span = 24;
+    row(1, bx - 1);
+    R("#7D8B96", bx, bank - 2, span, 1); R("#B9C6CF", bx, bank - 1, span, 1);
+    for (let i = 0; i <= span; i++) {
+      const y = bank - 4 - Math.round(3 * Math.abs(Math.sin(i / span * Math.PI * 2)));
+      R("#63BFC666", bx + i, y, 1, bank - 2 - y); R("#E6F7F8", bx + i, y);
+    }
+    // серные бани Абанотубани
+    const ab = Math.round(cw * 0.78);
+    row(bx + span + 2, ab - 9);
+    for (const dx of [-5, 3]) {
+      const cx = ab + dx;
+      R("#B5653F", cx - 4, bank - 3, 9, 3);
+      [4, 4, 3, 2, 1].forEach((k, i) => R(i & 1 ? "#C97650" : "#B5653F", cx - k, bank - 4 - i, 2 * k + 1, 1));
+      R("#7A3E25", cx, bank - 10, 1, 2);
+    }
+    row(ab + 9, cw);
+  }
+
   function buildRegions(b) {
     const cw = Math.round(tileW / b);
     const L = (hc, paint) => cellLayer(cw, hc, b, paint);
@@ -661,6 +945,8 @@
       { far: L(66, paintMoscowFar), near: L(48, paintMoscowNear) },
       { far: L(34, paintSantoriniFar), near: L(44, paintSantoriniNear) },
       { far: L(70, paintYerevanFar), near: L(46, paintYerevanNear) },
+      { far: L(64, paintBakuFar), near: L(44, paintBakuNear) },
+      { far: L(62, paintTbilisiFar), near: L(46, paintTbilisiNear) },
     ];
   }
 
@@ -825,6 +1111,8 @@
       this.particles = [];
       this.sky = { from: 0, to: 0, t: 1 };
       this.region = { from: 0, to: 0, t: 1 };
+      this.regionBag = [];
+      Music.setTheme(0);
       this.banner = null;
       this.playT = 0;
       this.resumeIn = 0;
@@ -1057,12 +1345,24 @@
       this.burst(this.birdX + 6 * u, this.bird.y, 7, { colors: ["#FFD23F", "#FFFFFF"], speed: [60, 170], size: [3, 6], life: [0.3, 0.55], g: 200 });
       const theme = Math.floor(this.score / CFG.themeEvery) % SKIES.length;
       if (theme !== this.sky.to) this.sky = { from: this.sky.to, to: theme, t: 0 };
-      const region = Math.floor(this.score / CFG.regionEvery) % REGIONS.length;
-      if (region !== this.region.to) {
+      // первые очки — Зелёная долина, дальше каждые 10 труб случайный город
+      if (this.score >= CFG.regionFrom && (this.score - CFG.regionFrom) % CFG.regionEvery === 0) {
+        const region = this.nextRegion();
         this.region = { from: this.region.to, to: region, t: 0 };
         this.banner = { text: REGIONS[region].name, t: 0 };
+        Music.setTheme(region);
       }
-      if (this.score === CFG.moveFrom) toast("ТРУБЫ ОЖИЛИ!");
+    }
+
+    // случайный город без повторов, пока не покажем все
+    nextRegion() {
+      if (!this.regionBag.length) {
+        const bag = REGIONS.map((_, i) => i).slice(1);
+        for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; }
+        if (bag[0] === this.region.to) bag.push(bag.shift());
+        this.regionBag = bag;
+      }
+      return this.regionBag.shift();
     }
 
     collide() {
