@@ -136,7 +136,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.6";
+  const VERSION = "1.7";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 178, minGap: 148,
@@ -1269,9 +1269,12 @@
       this.buttons = [];
       this.particles = [];
       this.sky = { from: 0, to: 0, t: 1 };
-      this.region = { from: 0, to: 0, t: 1 };
+      // после проигрыша продолжаем в том же городе и с его музыкой (при запуске — Зелёная долина)
+      const keep = this.region ? this.region.to : 0;
+      this.startRegion = keep;
+      this.region = { from: keep, to: keep, t: 1 };
       this.regionBag = []; this.sched = []; this.spawned = 0;
-      Music.setTheme(0);
+      Music.setTheme(keep);
       this.banner = null;
       this.playT = 0;
       this.resumeIn = 0;
@@ -1526,9 +1529,9 @@
 
     // город для трубы/очка с номером sc: расписание смены городов строится заранее
     regionAt(sc) {
-      if (sc < CFG.regionFrom) return 0;
+      if (sc < CFG.regionFrom) return this.startRegion;
       const k = Math.floor((sc - CFG.regionFrom) / CFG.regionEvery);
-      while (this.sched.length <= k) this.sched.push(this.nextRegion(this.sched.length ? this.sched[this.sched.length - 1] : 0));
+      while (this.sched.length <= k) this.sched.push(this.nextRegion(this.sched.length ? this.sched[this.sched.length - 1] : this.startRegion));
       return this.sched[k];
     }
     // отделка колонны: свой стиль у каждого города; в Санторини белая и синяя по очереди
