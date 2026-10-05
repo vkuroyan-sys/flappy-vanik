@@ -154,7 +154,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.11";
+  const VERSION = "1.12";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 178, minGap: 148,
@@ -1043,6 +1043,8 @@
     });
   }
   const pipeSides = (R, cw, y0, h) => { R(OUTLINE, 1, y0, 1, h); R(OUTLINE, cw - 2, y0, 1, h); };
+  // рамка оголовка — та же форма, что у зелёной трубы: сплошной прямоугольник во всю ширину
+  const pipeCap = (R, cw, cr) => { R(OUTLINE, 0, 0, cw, 1); R(OUTLINE, 0, cr - 1, cw, 1); R(OUTLINE, 0, 0, 1, cr); R(OUTLINE, cw - 1, 0, 1, cr); };
 
   // Москва: кремлёвский кирпич, зубцы «ласточкин хвост», белокаменный пояс
   function paintKremlinPipe(R, cw, ch, cr) {
@@ -1054,13 +1056,12 @@
     }
     R(BRL, 2, cr, 1, ch - cr); R(BRD, cw - 3, cr, 1, ch - cr);
     pipeSides(R, cw, cr, ch - cr);
-    const n = Math.floor((cw + 1) / 4), x0 = Math.floor((cw - (n * 4 - 1)) / 2);
-    for (let k = 0; k < n; k++) {
-      const x = x0 + k * 4;
-      R(BR, x, 1, 3, 3); R(BR, x, 0); R(BR, x + 2, 0); R(BRL, x, 0, 1, 4); R(BRD, x + 2, 0, 1, 4);
-    }
-    R(OUTLINE, 0, 4, cw, 1); R(WH, 0, 5, cw, 1); R(OUTLINE, 0, cr - 1, cw, 1);
-    R(OUTLINE, 0, 4, 1, cr - 4); R(OUTLINE, cw - 1, 4, 1, cr - 4);
+    R(BR, 1, 1, cw - 2, cr - 2); R(BRL, 1, 1, cw - 2, 1);
+    for (let x = 3; x < cw - 1; x += 4) R(MOR, x, 2);
+    R(WH, 1, 3, cw - 2, 1);
+    for (let x = 5; x < cw - 1; x += 4) R(MOR, x, 4);
+    R(BRD, 1, cr - 2, cw - 2, 1); R(BRL, 1, 1, 1, cr - 2); R(BRD, cw - 3, 1, 2, cr - 2);
+    pipeCap(R, cw, cr);
   }
 
   // Санторини: дорическая колонна (белый мрамор Акрополя или синяя)
@@ -1073,12 +1074,10 @@
     }
     for (let y = cr + 12; y < ch; y += 16) R(P.dark, 2, y, cw - 4, 1); // стыки барабанов
     pipeSides(R, cw, cr, ch - cr);
-    // капитель: абака, эхин, шейка
-    R(OUTLINE, 0, 0, cw, 1); R(P.capL, 1, 1, cw - 2, 1); R(P.cap, 1, 2, cw - 2, 1); R(OUTLINE, 0, 3, cw, 1);
-    R(OUTLINE, 0, 0, 1, 5); R(OUTLINE, cw - 1, 0, 1, 5);
-    R(P.cap, 1, 4, cw - 2, 1); R(P.capS, cw - 4, 4, 3, 1);
-    R(OUTLINE, 1, 5, 1, 1); R(OUTLINE, cw - 2, 5, 1, 1); R(P.cap, 2, 5, cw - 4, 1); R(P.capS, cw - 5, 5, 3, 1);
-    R(OUTLINE, 1, cr - 1, cw - 2, 1);
+    // капитель полосами: абака и эхин, форма как у оголовка зелёной трубы
+    R(P.cap, 1, 1, cw - 2, cr - 2); R(P.capL, 1, 1, cw - 2, 1); R(P.capS, 1, 3, cw - 2, 1); R(P.capL, 1, 4, cw - 2, 1);
+    R(P.capL, 1, 1, 1, cr - 2); R(P.capS, cw - 4, 1, 2, cr - 2);
+    pipeCap(R, cw, cr);
   }
   const MARBLE = { base: "#F2EEE6", light: "#FFFFFF", shade: "#D9D1C3", flute: "#D6CDBE", dark: "#BDB3A2", cap: "#EDE7DC", capL: "#FFFFFF", capS: "#CFC6B6" };
   const AEGEAN = { base: "#2F6FD0", light: "#5B95E8", shade: "#2155A8", flute: "#2860BC", dark: "#173F80", cap: "#FFFFFF", capL: "#FFFFFF", capS: "#D9E4EE" };
@@ -1098,10 +1097,10 @@
       R(GOLD, c - 1, yc + 7, 3, 1); R(GOLD, c, yc + 6, 1, 3);
     }
     pipeSides(R, cw, cr, ch - cr);
-    for (let x = 1; x < cw - 1; x += 2) R(IV, x, 0, 1, 3);
-    R(OUTLINE, 0, 3, cw, 1); R(NAVY, 0, 4, cw, 1); for (let x = 1; x < cw - 1; x += 2) R(GOLD, x, 4);
-    R(RD, 0, 5, cw, 1); R(OUTLINE, 0, cr - 1, cw, 1);
-    R(OUTLINE, 0, 3, 1, cr - 3); R(OUTLINE, cw - 1, 3, 1, cr - 3);
+    R(NAVY, 1, 1, cw - 2, cr - 2);
+    for (let x = 2; x < cw - 2; x += 2) { R(IV, x, 1, 1, 2); R(GOLD, x, 3); }
+    R(RD, 1, 4, cw - 2, 1); R(RED, 1, 5, cw - 2, 1);
+    pipeCap(R, cw, cr);
   }
 
   // Тбилиси и Ереван: стандартная труба, белая как скатерть, с нарисованными (гладкими, не пиксельными) блюдами
