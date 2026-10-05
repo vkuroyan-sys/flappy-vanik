@@ -136,7 +136,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.4";
+  const VERSION = "1.5";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 76, pipeSpacing: 235, baseGap: 178, minGap: 148,
@@ -980,6 +980,134 @@
     ];
   }
 
+  // ---------- Колонны городов: та же форма, что у трубы (оголовок + ствол), своя отделка ----------
+  const PIPE_SKIN = ["green", "kremlin", "santorini", "cascade", "carpet", "food"];
+  function pipeSkin(pw, capH, b, paint) {
+    const cw = Math.round(pw / b), ch = Math.ceil(H / b) + 1, cr = Math.round(capH / b);
+    return offscreen(pw, H, (g) => {
+      const R = (c, x, y, w = 1, h = 1) => { if (w > 0 && h > 0) { g.fillStyle = c; g.fillRect(x * b, y * b, w * b + 0.5, h * b + 0.5); } };
+      paint(R, cw, ch, cr);
+    });
+  }
+  const pipeSides = (R, cw, y0, h) => { R(OUTLINE, 1, y0, 1, h); R(OUTLINE, cw - 2, y0, 1, h); };
+
+  // Москва: кремлёвский кирпич, зубцы «ласточкин хвост», белокаменный пояс
+  function paintKremlinPipe(R, cw, ch, cr) {
+    const BR = "#B8352E", BRD = "#8E2A22", BRL = "#D25443", MOR = "#E3B9A0", WH = "#F4EFE6";
+    R(BR, 2, cr, cw - 4, ch - cr);
+    for (let y = cr; y < ch; y += 3) {
+      R(MOR, 2, y, cw - 4, 1);
+      for (let x = 2 + (Math.floor((y - cr) / 3) & 1 ? 2 : 0); x < cw - 2; x += 4) R(MOR, x, y + 1, 1, 2);
+    }
+    R(BRL, 2, cr, 1, ch - cr); R(BRD, cw - 3, cr, 1, ch - cr);
+    pipeSides(R, cw, cr, ch - cr);
+    const n = Math.floor((cw + 1) / 4), x0 = Math.floor((cw - (n * 4 - 1)) / 2);
+    for (let k = 0; k < n; k++) {
+      const x = x0 + k * 4;
+      R(BR, x, 1, 3, 3); R(BR, x, 0); R(BR, x + 2, 0); R(BRL, x, 0, 1, 4); R(BRD, x + 2, 0, 1, 4);
+    }
+    R(OUTLINE, 0, 4, cw, 1); R(WH, 0, 5, cw, 1); R(OUTLINE, 0, cr - 1, cw, 1);
+    R(OUTLINE, 0, 4, 1, cr - 4); R(OUTLINE, cw - 1, 4, 1, cr - 4);
+  }
+
+  // Санторини: дорическая колонна (белый мрамор Акрополя или синяя)
+  function paintColumnPipe(R, cw, ch, cr, P) {
+    for (let i = 2; i < cw - 2; i++) {
+      const f = (i - 2) / (cw - 5);
+      let c = f < 0.18 ? P.light : f > 0.72 ? P.shade : P.base;
+      if ((i - 2) % 3 === 2) c = f > 0.72 ? P.dark : P.flute; // каннелюры
+      R(c, i, cr, 1, ch - cr);
+    }
+    for (let y = cr + 12; y < ch; y += 16) R(P.dark, 2, y, cw - 4, 1); // стыки барабанов
+    pipeSides(R, cw, cr, ch - cr);
+    // капитель: абака, эхин, шейка
+    R(OUTLINE, 0, 0, cw, 1); R(P.capL, 1, 1, cw - 2, 1); R(P.cap, 1, 2, cw - 2, 1); R(OUTLINE, 0, 3, cw, 1);
+    R(OUTLINE, 0, 0, 1, 5); R(OUTLINE, cw - 1, 0, 1, 5);
+    R(P.cap, 1, 4, cw - 2, 1); R(P.capS, cw - 4, 4, 3, 1);
+    R(OUTLINE, 1, 5, 1, 1); R(OUTLINE, cw - 2, 5, 1, 1); R(P.cap, 2, 5, cw - 4, 1); R(P.capS, cw - 5, 5, 3, 1);
+    R(OUTLINE, 1, cr - 1, cw - 2, 1);
+  }
+  const MARBLE = { base: "#F2EEE6", light: "#FFFFFF", shade: "#D9D1C3", flute: "#D6CDBE", dark: "#BDB3A2", cap: "#EDE7DC", capL: "#FFFFFF", capS: "#CFC6B6" };
+  const AEGEAN = { base: "#2F6FD0", light: "#5B95E8", shade: "#2155A8", flute: "#2860BC", dark: "#173F80", cap: "#FFFFFF", capL: "#FFFFFF", capS: "#D9E4EE" };
+
+  // Баку: ковёр — красное поле, синяя кайма, медальоны-гёли, бахрома на торце
+  function paintCarpetPipe(R, cw, ch, cr) {
+    const RED = "#A3242B", RD = "#7E1A21", NAVY = "#1F2A5A", GOLD = "#E2B23C", IV = "#EADFC8";
+    R(RED, 2, cr, cw - 4, ch - cr);
+    for (const x of [2, cw - 4]) R(NAVY, x, cr, 2, ch - cr);
+    R(IV, 4, cr, 1, ch - cr); R(IV, cw - 5, cr, 1, ch - cr);
+    for (let y = cr + 1; y < ch; y += 3) { R(GOLD, 2 + ((y >> 1) & 1), y); R(GOLD, cw - 4 + ((y >> 1) & 1), y); }
+    const c = Math.floor(cw / 2);
+    for (let yc = cr + 8; yc < ch + 6; yc += 14) {
+      for (let dy = -5; dy <= 5; dy++) { const k = 5 - Math.abs(dy); R(NAVY, c - k, yc + dy, 2 * k + 1, 1); }
+      for (let dy = -3; dy <= 3; dy++) { const k = 3 - Math.abs(dy); R(IV, c - k, yc + dy, 2 * k + 1, 1); }
+      R(RED, c, yc - 1, 1, 3); R(RED, c - 1, yc, 3, 1); R(GOLD, c, yc);
+      R(GOLD, c - 1, yc + 7, 3, 1); R(GOLD, c, yc + 6, 1, 3);
+    }
+    pipeSides(R, cw, cr, ch - cr);
+    for (let x = 1; x < cw - 1; x += 2) R(IV, x, 0, 1, 3);
+    R(OUTLINE, 0, 3, cw, 1); R(NAVY, 0, 4, cw, 1); for (let x = 1; x < cw - 1; x += 2) R(GOLD, x, 4);
+    R(RD, 0, 5, cw, 1); R(OUTLINE, 0, cr - 1, cw, 1);
+    R(OUTLINE, 0, 3, 1, cr - 3); R(OUTLINE, cw - 1, 3, 1, cr - 3);
+  }
+
+  // Тбилиси: хинкали и хачапури на шампуре, сверху — аджарское хачапури с желтком
+  function paintFoodPipe(R, cw, ch, cr) {
+    const c = Math.floor(cw / 2), DO = "#F1E3C8", DS = "#D9C19A", DE = "#8A6A44", CR = "#D98A3D", CRD = "#A85F24", CH = "#F6D35B", YO = "#F39A1E", YL = "#FFD27A";
+    R("#7A5236", c - 1, cr, 3, ch - cr); R("#5E3E26", c + 1, cr, 1, ch - cr);
+    const khinkali = (y) => {
+      const rows = [3, 5, 7, 11, 15, 17, 19, 19, 19, 17, 13];
+      rows.forEach((w, i) => {
+        const x = c - (w >> 1);
+        R(i > 8 ? DS : DO, x, y + i, w, 1); R(DS, x + w - 3, y + i, 3, 1); R(DE, x, y + i); R(DE, x + w - 1, y + i);
+        if (i > 1 && i < 8) for (const j of [-3, -2, -1, 1, 2, 3]) R("#C4A77A", c + Math.round(j * (w - 1) / 8), y + i); // складки к хвостику
+      });
+      R(DE, c - 1, y - 2, 3, 2); R(DO, c, y - 2); // хвостик
+      R(DE, c - 6, y + rows.length, 13, 1);
+    };
+    const khachapuri = (y) => {
+      [9, 15, 19, 19, 19, 19, 15, 9].forEach((w, i) => { const x = c - (w >> 1); R(CR, x, y + i, w, 1); R(CRD, x, y + i); R(CRD, x + w - 1, y + i); });
+      R(CRD, c - 4, y + 8, 9, 1);
+      [5, 9, 11, 11, 9, 5].forEach((w, i) => R(CH, c - (w >> 1), y + 1 + i, w, 1));
+      R(YO, c - 1, y + 2, 3, 3); R(YL, c - 1, y + 2); R("#FFFFFF", c + 2, y + 3);
+    };
+    for (let y = cr + 2, k = 0; y < ch; y += (k & 1 ? 11 : 15), k++) (k & 1 ? khachapuri : khinkali)(y);
+    [13, 19, 21, 21, 19, 13].forEach((w, i) => { const x = c - (w >> 1); R(CR, x, i, w, 1); R(CRD, x, i); R(CRD, x + w - 1, i); });
+    [7, 13, 13, 7].forEach((w, i) => R(CH, c - (w >> 1), 1 + i, w, 1));
+    R(YO, c - 1, 1, 3, 3); R(YL, c - 1, 1); R("#FFF6D8", c - 4, 2, 2, 1);
+    R(OUTLINE, 1, cr - 1, cw - 2, 1);
+  }
+
+  // Ереван: Каскад — травертиновые террасы с садами, арками, лестницей и фонтанами
+  function paintCascadePipe(R, cw, ch, cr) {
+    const TR = "#EFE4CE", TS = "#D5C4A2", TL = "#FAF3E3", GR = "#5CA64E", GD = "#3F8A3A", ARC = "#A88F6A", WA = "#7CC4F0", TUFF = "#D89A88";
+    const c = Math.floor(cw / 2);
+    R(TR, 2, cr, cw - 4, ch - cr); R(TL, 2, cr, 1, ch - cr); R(TS, cw - 3, cr, 1, ch - cr);
+    for (let y = cr + 2; y < ch; y += 10) {
+      R(GR, 2, y, cw - 4, 1); for (let x = 3; x < cw - 3; x += 3) R(GD, x, y - 1);
+      R(TS, 2, y + 1, cw - 4, 1);
+      for (const x of [3, cw - 6]) { R(ARC, x, y + 4, 3, 4); R(ARC, x + 1, y + 3); }
+      for (let k = 0; k < 8; k++) R(k & 1 ? TS : TL, c - 2, y + 2 + k, 5, 1);
+      R(WA, c - 1, y + 8, 3, 1);
+    }
+    pipeSides(R, cw, cr, ch - cr);
+    R(OUTLINE, 0, 0, cw, 1); R(GR, 1, 1, cw - 2, 1); for (let x = 2; x < cw - 2; x += 3) R(GD, x, 1);
+    R(TUFF, 1, 2, cw - 2, 1); R(TL, 1, 3, cw - 2, 2); R(WA, c - 2, 4, 5, 1); R(TS, 1, 5, cw - 2, 1); R(OUTLINE, 0, cr - 1, cw, 1);
+    R(OUTLINE, 0, 0, 1, cr); R(OUTLINE, cw - 1, 0, 1, cr);
+  }
+
+  function buildPipeSkins(pw, capH, b) {
+    const S = (paint) => pipeSkin(pw, capH, b, paint);
+    return {
+      kremlin: S(paintKremlinPipe),
+      white: S((R, cw, ch, cr) => paintColumnPipe(R, cw, ch, cr, MARBLE)),
+      blue: S((R, cw, ch, cr) => paintColumnPipe(R, cw, ch, cr, AEGEAN)),
+      carpet: S(paintCarpetPipe),
+      food: S(paintFoodPipe),
+      cascade: S(paintCascadePipe),
+    };
+  }
+
   function buildTextures() {
     const b = block;
     tex.skies = SKIES.map(def => buildSky(def, b));
@@ -1039,6 +1167,7 @@
       rect(g, OUTLINE, 0, capH - b, pw, b);
       rect(g, "#3E8A2A", over, capH, bodyW, b);
     });
+    tex.pipes = buildPipeSkins(pw, capH, b);
     buildRegions(b);
   }
 
@@ -1141,7 +1270,7 @@
       this.particles = [];
       this.sky = { from: 0, to: 0, t: 1 };
       this.region = { from: 0, to: 0, t: 1 };
-      this.regionBag = [];
+      this.regionBag = []; this.sched = []; this.spawned = 0;
       Music.setTheme(0);
       this.banner = null;
       this.playT = 0;
@@ -1287,7 +1416,7 @@
       }
       this.lastGap = y;
       this.lastAmp = move ? move.amp : 0;
-      const p = { x: W + tex.pipe.w, gapY: y, baseY: y, gap, passed: false, move };
+      const p = { x: W + tex.pipe.w, gapY: y, baseY: y, gap, passed: false, move, skin: this.pipeSkin(this.spawned++) };
       if (move) p.gapY = y + Math.sin(move.ph + this.playT * move.w) * move.amp;
       this.pipes.push(p);
     }
@@ -1377,7 +1506,7 @@
       if (theme !== this.sky.to) this.sky = { from: this.sky.to, to: theme, t: 0 };
       // первые очки — Зелёная долина, дальше каждые 10 труб случайный город
       if (this.score >= CFG.regionFrom && (this.score - CFG.regionFrom) % CFG.regionEvery === 0) {
-        const region = this.nextRegion();
+        const region = this.regionAt(this.score);
         this.region = { from: this.region.to, to: region, t: 0 };
         this.banner = { text: REGIONS[region].name, t: 0 };
         Music.setTheme(region);
@@ -1385,14 +1514,28 @@
     }
 
     // случайный город без повторов, пока не покажем все
-    nextRegion() {
+    nextRegion(prev) {
       if (!this.regionBag.length) {
         const bag = REGIONS.map((_, i) => i).slice(1);
         for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; }
-        if (bag[0] === this.region.to) bag.push(bag.shift());
+        if (bag[0] === prev) bag.push(bag.shift());
         this.regionBag = bag;
       }
       return this.regionBag.shift();
+    }
+
+    // город для трубы/очка с номером sc: расписание смены городов строится заранее
+    regionAt(sc) {
+      if (sc < CFG.regionFrom) return 0;
+      const k = Math.floor((sc - CFG.regionFrom) / CFG.regionEvery);
+      while (this.sched.length <= k) this.sched.push(this.nextRegion(this.sched.length ? this.sched[this.sched.length - 1] : 0));
+      return this.sched[k];
+    }
+    // отделка колонны: свой стиль у каждого города; в Санторини 3 белых, затем 2 синих
+    pipeSkin(sc) {
+      const s = PIPE_SKIN[this.regionAt(sc)];
+      if (s !== "santorini") return s;
+      return ((sc - CFG.regionFrom) % CFG.regionEvery) % 5 < 3 ? "white" : "blue";
     }
 
     collide() {
@@ -1453,14 +1596,15 @@
       const pw = tex.pipe.w, sc = tex.pipe.width / pw;
       for (const p of this.pipes) {
         if (p.x + pw / 2 < 0 || p.x - pw / 2 > W) continue;
+      const pt = (tex.pipes && tex.pipes[p.skin]) || tex.pipe;
         const bottom = p.gapY + p.gap / 2, top = p.gapY - p.gap / 2;
         const hb = Math.min(H, groundY + block - bottom), ht = Math.min(H, top + 2);
-        if (hb > 0) ctx.drawImage(tex.pipe, 0, 0, tex.pipe.width, hb * sc, p.x - pw / 2, bottom, pw, hb);
+        if (hb > 0) ctx.drawImage(pt, 0, 0, pt.width, hb * sc, p.x - pw / 2, bottom, pw, hb);
         if (ht > 0) {
           ctx.save();
           ctx.translate(p.x, top);
           ctx.scale(1, -1);
-          ctx.drawImage(tex.pipe, 0, 0, tex.pipe.width, ht * sc, -pw / 2, 0, pw, ht);
+          ctx.drawImage(pt, 0, 0, pt.width, ht * sc, -pw / 2, 0, pw, ht);
           ctx.restore();
         }
       }
