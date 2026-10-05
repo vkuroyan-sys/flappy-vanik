@@ -136,7 +136,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.9";
+  const VERSION = "1.10";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 178, minGap: 148,
@@ -261,7 +261,10 @@
     flute: { waves: ["triangle", "sine"], cut: 5000, v: 0.11, vib: 10, bend: 0.99, att: 0.05 },
     accordion: { waves: ["square", "sawtooth"], cut: 2600, v: 0.04, vib: 4, bend: 1, att: 0.03 },
     clarinet: { waves: ["square"], cut: 2400, v: 0.07, vib: 9, bend: 0.98, att: 0.02 },
-    lyra: { waves: ["sawtooth"], cut: 3200, v: 0.06, vib: 16, bend: 0.98, att: 0.015 },
+    // тембры, снятые с записей: громкость обертонов 1..10 ведущего инструмента
+    lyra: { harm: [0.89, 1, 0.75, 0.33, 0.38, 0.24, 0.11, 0.08, 0.05, 0.07], cut: 7000, v: 0.075, vib: 16, bend: 0.98, att: 0.015 },
+    bakuLead: { harm: [1, 0.78, 0.55, 0.34, 0.2, 0.16, 0.08, 0.03, 0.02, 0.01], cut: 7000, v: 0.08, vib: 10, bend: 0.97, att: 0.02 },
+    tbLead: { harm: [1, 0.58, 0.27, 0.12, 0.04, 0.08, 0.02, 0.02, 0.01, 0.01], cut: 7000, v: 0.1, vib: 8, bend: 0.98, att: 0.04 },
   };
   const THEMES = [
     { // Старт (Зелёная долина): Am – F – C – G
@@ -316,8 +319,8 @@
         [[0, 69, 6], [6, 69, 2], [8, 73, 2], [10, 76, 2]],
       ],
     },
-    { // Баку: быстрая пляска в до-диез миноре — гармонь, «ум-па», нагара
-      bpm: 178, gain: 1.6, voice: "accordion", bass: "oompah", arp: false, drum: "naghara",
+    { // Баку: быстрая пляска в до-диез миноре — тембр ведущего инструмента снят с записи, «ум-па», нагара
+      bpm: 178, gain: 1.6, voice: "bakuLead", bass: "oompah", arp: false, drum: "naghara",
       chords: [[37, [61, 64, 68, 73]], [37, [61, 64, 68, 73]], [42, [61, 66, 69, 73]], [37, [61, 64, 68, 73]], [45, [61, 64, 69, 73]], [47, [59, 63, 66, 71]], [44, [60, 63, 68, 72]], [37, [61, 64, 68, 73]]],
       lead: [
         [[0, 73, 2], [2, 76, 2], [4, 80, 2], [6, 78, 2], [8, 76, 2], [10, 75, 2], [12, 73, 4]],
@@ -330,8 +333,8 @@
         [[0, 73, 4], [4, 80, 2], [6, 76, 2], [8, 73, 8]],
       ],
     },
-    { // Тбилиси: плясовая 6/8 в ми гармоническом миноре — кларнет, дхол
-      bpm: 176, len: 12, gain: 0.78, voice: "clarinet", bass: "six", arp: false, drum: "dhol68",
+    { // Тбилиси: плясовая 6/8 в ми гармоническом миноре — мягкий духовой (тембр снят с записи), дхол
+      bpm: 176, len: 12, gain: 0.78, voice: "tbLead", bass: "six", arp: false, drum: "dhol68",
       chords: [[40, [64, 67, 71, 76]], [40, [64, 67, 71, 76]], [45, [64, 69, 72, 76]], [47, [63, 66, 69, 71]], [48, [64, 67, 72, 76]], [45, [64, 69, 72, 76]], [47, [63, 66, 69, 71]], [40, [64, 67, 71, 76]]],
       lead: [
         [[0, 76, 2], [2, 75, 2], [4, 76, 2], [6, 79, 2], [8, 78, 2], [10, 76, 2]],
@@ -408,8 +411,9 @@
       const c = Audio.ctx, fl = c.createBiquadFilter(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain(), oscs = [];
       fl.type = "lowpass"; fl.frequency.value = w.cut; fl.Q.value = 2;
       lfo.frequency.value = 5.2; lg.gain.value = w.vib; lfo.connect(lg);
-      for (const type of w.waves) {
-        const o = c.createOscillator(); o.type = type;
+      for (const type of (w.harm ? ["harm"] : w.waves)) {
+        const o = c.createOscillator();
+        if (type === "harm") o.setPeriodicWave(this.periodic(w)); else o.type = type;
         o.frequency.setValueAtTime(f * w.bend, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.06);
         lg.connect(o.detune); o.connect(fl); oscs.push(o);
       }
@@ -418,6 +422,14 @@
       g.gain.setValueAtTime(v, t + Math.max(a, dur - 0.08)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       fl.connect(g); g.connect(Audio.musicBus);
       for (const o of [...oscs, lfo]) { o.start(t); o.stop(t + dur + 0.02); }
+    },
+    // волна с заданными обертонами (строится один раз на инструмент)
+    periodic(w) {
+      if (!w.pw || w.pwCtx !== Audio.ctx) {
+        const im = new Float32Array([0, ...w.harm]);
+        w.pw = Audio.ctx.createPeriodicWave(new Float32Array(im.length), im); w.pwCtx = Audio.ctx;
+      }
+      return w.pw;
     },
     lead(voice, n, t, dur, sp) {
       const f = this.freq(n), w = WINDS[voice];
