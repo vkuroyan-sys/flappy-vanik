@@ -276,7 +276,7 @@
       ],
     },
     { // Москва: русский этно-поп — свирель, синт-арпеджио, бочка «в пол»
-      bpm: 128, voice: "flute", bass: "pop", arp: true, drum: "edm", chords: [CH.Dm, CH.Bb, CH.C, CH.Dm, CH.Dm, CH.Bb, CH.C, CH.A],
+      bpm: 128, gain: 0.66, voice: "flute", bass: "pop", arp: true, drum: "edm", chords: [CH.Dm, CH.Bb, CH.C, CH.Dm, CH.Dm, CH.Bb, CH.C, CH.A],
       lead: [
         [[0, 74, 3], [3, 72, 1], [4, 74, 2], [6, 77, 2], [8, 76, 2], [10, 74, 2], [12, 72, 2], [14, 69, 2]],
         [[0, 70, 3], [3, 72, 1], [4, 74, 2], [6, 72, 2], [8, 70, 4], [12, 69, 2], [14, 70, 2]],
@@ -303,7 +303,7 @@
       ],
     },
     { // Ереван: плясовая в духе Шалахо — зурна, дам, дхол, размер 6/8
-      bpm: 200, len: 12, voice: "zurna", bass: "drone", tonic: 45, arp: false, drum: "dhol68", chords: [CH.A],
+      bpm: 200, len: 12, gain: 0.74, voice: "zurna", bass: "drone", tonic: 45, arp: false, drum: "dhol68", chords: [CH.A],
       lead: [
         [[0, 76, 2], [2, 77, 1], [3, 76, 1], [4, 74, 2], [6, 73, 2], [8, 74, 2], [10, 76, 2]],
         [[0, 77, 2], [2, 76, 2], [4, 74, 2], [6, 73, 4], [10, 70, 2]],
@@ -316,7 +316,7 @@
       ],
     },
     { // Баку: бакинский джаз — свинг, саксофон с мугамными оборотами, шагающий бас, щётки
-      bpm: 120, swing: 0.33, voice: "sax", bass: "walk", arp: false, comp: true, drum: "jazz",
+      bpm: 120, swing: 0.33, gain: 1.2, voice: "sax", bass: "walk", arp: false, comp: true, drum: "jazz",
       chords: [CH.Em7b5, CH.A7, CH.Dm7, CH.Dm7, CH.Gm7, CH.C7, CH.Fmaj7, CH.A7],
       lead: [
         [[0, 74, 3], [3, 76, 1], [4, 77, 2], [6, 76, 2], [8, 74, 2], [10, 70, 2], [12, 72, 4]],
@@ -390,7 +390,7 @@
       o.type = type; o.frequency.setValueAtTime(f, t);
       if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(vol, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(vol * (this.theme.gain || 1), t + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       o.connect(g); g.connect(Audio.musicBus);
       o.start(t); o.stop(t + dur + 0.02);
@@ -398,7 +398,7 @@
     hiss(t, dur, vol, type, f) {
       const c = Audio.ctx, s = c.createBufferSource(), fl = c.createBiquadFilter(), g = c.createGain();
       s.buffer = this.noise; fl.type = type; fl.frequency.value = f;
-      g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      g.gain.setValueAtTime(vol * (this.theme.gain || 1), t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       s.connect(fl); fl.connect(g); g.connect(Audio.musicBus);
       s.start(t, Math.random() * 0.3); s.stop(t + dur + 0.02);
     },
@@ -412,9 +412,9 @@
         o.frequency.setValueAtTime(f * w.bend, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.06);
         lg.connect(o.detune); o.connect(fl); oscs.push(o);
       }
-      const a = Math.min(w.att, dur * 0.3);
-      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(w.v, t + a);
-      g.gain.setValueAtTime(w.v, t + Math.max(a, dur - 0.08)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      const a = Math.min(w.att, dur * 0.3), v = w.v * (this.theme.gain || 1);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + a);
+      g.gain.setValueAtTime(v, t + Math.max(a, dur - 0.08)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       fl.connect(g); g.connect(Audio.musicBus);
       for (const o of [...oscs, lfo]) { o.start(t); o.stop(t + dur + 0.02); }
     },
