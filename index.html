@@ -136,7 +136,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.7";
+  const VERSION = "1.8";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 178, minGap: 148,
@@ -981,7 +981,7 @@
   }
 
   // ---------- Колонны городов: та же форма, что у трубы (оголовок + ствол), своя отделка ----------
-  const PIPE_SKIN = ["green", "kremlin", "santorini", "cascade", "carpet", "food"];
+  const PIPE_SKIN = ["green", "kremlin", "santorini", "yerevan", "carpet", "tbilisi"];
   function pipeSkin(pw, capH, b, paint) {
     const cw = Math.round(pw / b), ch = Math.ceil(H / b) + 1, cr = Math.round(capH / b);
     return offscreen(pw, H, (g) => {
@@ -1051,49 +1051,129 @@
     R(OUTLINE, 0, 3, 1, cr - 3); R(OUTLINE, cw - 1, 3, 1, cr - 3);
   }
 
-  // Тбилиси: хинкали и хачапури на шампуре, сверху — аджарское хачапури с желтком
-  function paintFoodPipe(R, cw, ch, cr) {
-    const c = Math.floor(cw / 2), DO = "#F1E3C8", DS = "#D9C19A", DE = "#8A6A44", CR = "#D98A3D", CRD = "#A85F24", CH = "#F6D35B", YO = "#F39A1E", YL = "#FFD27A";
-    R("#7A5236", c - 1, cr, 3, ch - cr); R("#5E3E26", c + 1, cr, 1, ch - cr);
-    const khinkali = (y) => {
-      const rows = [3, 5, 7, 11, 15, 17, 19, 19, 19, 17, 13];
-      rows.forEach((w0, i) => {
-        const w = Math.min(w0, cw - 2), x = c - (w >> 1);
-        R(i > 8 ? DS : DO, x, y + i, w, 1); R(DS, x + w - 3, y + i, 3, 1); R(DE, x, y + i); R(DE, x + w - 1, y + i);
-        if (i > 1 && i < 8) for (const j of [-3, -2, -1, 1, 2, 3]) R("#C4A77A", c + Math.round(j * (w - 1) / 8), y + i); // складки к хвостику
-      });
-      R(DE, c - 1, y - 2, 3, 2); R(DO, c, y - 2); // хвостик
-      R(DE, c - 6, y + rows.length, 13, 1);
-    };
-    const khachapuri = (y) => {
-      [9, 15, 19, 19, 19, 19, 15, 9].forEach((w0, i) => { const w = Math.min(w0, cw - 2), x = c - (w >> 1); R(CR, x, y + i, w, 1); R(CRD, x, y + i); R(CRD, x + w - 1, y + i); });
-      R(CRD, c - 4, y + 8, 9, 1);
-      [5, 9, 11, 11, 9, 5].forEach((w, i) => R(CH, c - (w >> 1), y + 1 + i, w, 1));
-      R(YO, c - 1, y + 2, 3, 3); R(YL, c - 1, y + 2); R("#FFFFFF", c + 2, y + 3);
-    };
-    for (let y = cr + 2, k = 0; y < ch; y += (k & 1 ? 11 : 15), k++) (k & 1 ? khachapuri : khinkali)(y);
-    [13, 19, 21, 21, 19, 13].forEach((w0, i) => { const w = Math.min(w0, cw), x = c - (w >> 1); R(CR, x, i, w, 1); R(CRD, x, i); R(CRD, x + w - 1, i); });
-    [7, 13, 13, 7].forEach((w, i) => R(CH, c - (w >> 1), 1 + i, w, 1));
-    R(YO, c - 1, 1, 3, 3); R(YL, c - 1, 1); R("#FFF6D8", c - 4, 2, 2, 1);
-    R(OUTLINE, 1, cr - 1, cw - 2, 1);
-  }
-
-  // Ереван: Каскад — травертиновые террасы с садами, арками, лестницей и фонтанами
-  function paintCascadePipe(R, cw, ch, cr) {
-    const TR = "#EFE4CE", TS = "#D5C4A2", TL = "#FAF3E3", GR = "#5CA64E", GD = "#3F8A3A", ARC = "#A88F6A", WA = "#7CC4F0", TUFF = "#D89A88";
-    const c = Math.floor(cw / 2);
-    R(TR, 2, cr, cw - 4, ch - cr); R(TL, 2, cr, 1, ch - cr); R(TS, cw - 3, cr, 1, ch - cr);
-    for (let y = cr + 2; y < ch; y += 10) {
-      R(GR, 2, y, cw - 4, 1); for (let x = 3; x < cw - 3; x += 3) R(GD, x, y - 1);
-      R(TS, 2, y + 1, cw - 4, 1);
-      for (const x of [3, cw - 6]) { R(ARC, x, y + 4, 3, 4); R(ARC, x + 1, y + 3); }
-      for (let k = 0; k < 8; k++) R(k & 1 ? TS : TL, c - 2, y + 2 + k, 5, 1);
-      R(WA, c - 1, y + 8, 3, 1);
-    }
-    pipeSides(R, cw, cr, ch - cr);
-    R(OUTLINE, 0, 0, cw, 1); R(GR, 1, 1, cw - 2, 1); for (let x = 2; x < cw - 2; x += 3) R(GD, x, 1);
-    R(TUFF, 1, 2, cw - 2, 1); R(TL, 1, 3, cw - 2, 2); R(WA, c - 2, 4, 5, 1); R(TS, 1, 5, cw - 2, 1); R(OUTLINE, 0, cr - 1, cw, 1);
-    R(OUTLINE, 0, 0, 1, cr); R(OUTLINE, cw - 1, 0, 1, cr);
+  // Тбилиси и Ереван: стандартная труба, белая как скатерть, с нарисованными (гладкими, не пиксельными) блюдами
+  const ell = (g, x, y, rx, ry, rot = 0) => { g.beginPath(); g.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2); };
+  const radial = (g, x, y, r, c0, c1) => { const gr = g.createRadialGradient(x, y, r * 0.05, x, y, r); gr.addColorStop(0, c0); gr.addColorStop(1, c1); return gr; };
+  const dishShadow = (g, y, rx, ry) => { g.fillStyle = "rgba(60,50,40,0.12)"; ell(g, 0, y, rx, ry); g.fill(); };
+  const DISHES = {
+    khachapuri(g, s) { // аджарское: лодочка, сыр, желток, кусочек масла
+      const w = s * 0.5, h = s * 0.26;
+      dishShadow(g, h * 1.0, w * 0.85, h * 0.3);
+      g.beginPath(); g.moveTo(-w, 0); g.bezierCurveTo(-w * 0.6, -h * 1.35, w * 0.6, -h * 1.35, w, 0); g.bezierCurveTo(w * 0.6, h * 1.35, -w * 0.6, h * 1.35, -w, 0);
+      g.fillStyle = radial(g, -w * 0.2, -h * 0.4, w * 1.1, "#F5C477", "#C2722B"); g.fill();
+      g.lineWidth = s * 0.022; g.strokeStyle = "#94501C"; g.stroke();
+      for (const sx of [-1, 1]) { g.fillStyle = "#A9601F"; ell(g, sx * w * 0.93, 0, h * 0.2, h * 0.16); g.fill(); g.fillStyle = "#D08A3E"; ell(g, sx * w * 0.9, -h * 0.04, h * 0.1, h * 0.07); g.fill(); }
+      g.fillStyle = "#F7D35E"; ell(g, 0, 0, w * 0.62, h * 0.58); g.fill();
+      g.fillStyle = "#E9B347"; for (const [x, y, r] of [[-0.42, 0.18, 0.08], [0.4, -0.2, 0.07], [0.3, 0.28, 0.06], [-0.25, -0.3, 0.05]]) { ell(g, x * w, y * h, r * w, r * w * 0.7); g.fill(); }
+      g.fillStyle = "#FBEBA8"; for (const [x, y] of [[-0.3, 0.05], [0.25, 0.05], [-0.05, 0.35]]) { ell(g, x * w, y * h, w * 0.05, w * 0.035); g.fill(); }
+      g.fillStyle = radial(g, w * 0.02, -h * 0.12, h * 0.42, "#FFD34D", "#EE8A00"); ell(g, w * 0.06, 0, h * 0.4, h * 0.36); g.fill();
+      g.fillStyle = "rgba(255,255,255,0.75)"; ell(g, -h * 0.04, -h * 0.14, h * 0.12, h * 0.07, -0.4); g.fill();
+      g.save(); g.translate(-w * 0.32, -h * 0.08); g.rotate(-0.3); g.fillStyle = "#FFF3C2"; g.fillRect(-h * 0.17, -h * 0.13, h * 0.34, h * 0.26); g.fillStyle = "#F1DE97"; g.fillRect(-h * 0.17, h * 0.07, h * 0.34, h * 0.06); g.restore();
+    },
+    khinkali(g, s) { // хинкали: складки сходятся к хвостику, чёрный перец
+      const r = s * 0.42;
+      dishShadow(g, r * 0.6, r * 0.8, r * 0.13);
+      g.beginPath(); g.moveTo(0, -r * 0.74);
+      g.bezierCurveTo(r * 0.55, -r * 0.55, r * 1.02, -r * 0.08, r * 0.93, r * 0.27);
+      g.bezierCurveTo(r * 0.82, r * 0.62, -r * 0.82, r * 0.62, -r * 0.93, r * 0.27);
+      g.bezierCurveTo(-r * 1.02, -r * 0.08, -r * 0.55, -r * 0.55, 0, -r * 0.74); g.closePath();
+      g.fillStyle = radial(g, -r * 0.3, -r * 0.15, r * 1.1, "#FFFAF0", "#DCC7A0"); g.fill();
+      g.lineWidth = s * 0.016; g.strokeStyle = "#AE9570"; g.stroke();
+      g.lineWidth = s * 0.012; g.strokeStyle = "rgba(150,118,78,0.6)"; g.lineCap = "round";
+      for (let i = -5; i <= 5; i++) {
+        if (!i) continue;
+        const ex = i / 5 * r * 0.86, ey = r * 0.12 - Math.abs(i / 5) * r * 0.2;
+        g.beginPath(); g.moveTo(i * r * 0.012, -r * 0.7); g.quadraticCurveTo(ex * 0.55, -r * 0.42, ex, ey); g.stroke();
+      }
+      g.fillStyle = radial(g, -r * 0.04, -r * 0.86, r * 0.16, "#F6EBD3", "#D5BE94"); ell(g, 0, -r * 0.8, r * 0.14, r * 0.12); g.fill();
+      g.strokeStyle = "#AE9570"; g.lineWidth = s * 0.012; g.stroke();
+      g.fillStyle = "#E8D6B2"; ell(g, 0, -r * 0.94, r * 0.06, r * 0.07); g.fill();
+      g.fillStyle = "rgba(40,30,20,0.7)"; for (const [x, y] of [[-0.35, 0.05], [0.42, -0.02], [0.1, 0.3], [-0.12, -0.25], [0.3, 0.38]]) { ell(g, x * r, y * r, r * 0.025, r * 0.022); g.fill(); }
+    },
+    pomegranate(g, s) { // гранат с короной и листиком, рядом зёрна
+      const r = s * 0.34;
+      dishShadow(g, r * 0.95, r * 0.85, r * 0.16);
+      g.fillStyle = radial(g, -r * 0.35, -r * 0.3, r * 1.25, "#F0566E", "#8E0F2C"); ell(g, 0, 0, r, r * 0.96); g.fill();
+      g.beginPath(); g.moveTo(-r * 0.24, -r * 0.8);
+      for (let k = 0; k <= 5; k++) { const x = -r * 0.24 + k * r * 0.096; g.lineTo(x, k % 2 ? -r * 1.02 : -r * 1.14); }
+      g.lineTo(r * 0.24, -r * 0.8); g.closePath(); g.fillStyle = "#8B1530"; g.fill();
+      g.fillStyle = "#5E0C20"; ell(g, 0, -r * 0.86, r * 0.16, r * 0.06); g.fill();
+      g.fillStyle = "rgba(255,255,255,0.35)"; ell(g, -r * 0.42, -r * 0.38, r * 0.2, r * 0.12, -0.6); g.fill();
+      g.save(); g.translate(r * 0.42, -r * 1.0); g.rotate(-0.5); g.fillStyle = "#4E8A39"; ell(g, 0, 0, r * 0.32, r * 0.12); g.fill();
+      g.strokeStyle = "#2F6524"; g.lineWidth = s * 0.012; g.beginPath(); g.moveTo(-r * 0.3, 0); g.lineTo(r * 0.3, 0); g.stroke(); g.restore();
+      for (const [x, y] of [[-1.1, 0.75], [-0.95, 0.88], [1.05, 0.8], [1.2, 0.7], [1.12, 0.92]]) {
+        g.fillStyle = radial(g, x * r - r * 0.03, y * r - r * 0.03, r * 0.1, "#FF8FA0", "#B3123A"); ell(g, x * r, y * r, r * 0.08, r * 0.1, 0.4); g.fill();
+      }
+    },
+    dolma(g, s) { // три голубца в виноградных листьях и мацони с зеленью
+      dishShadow(g, s * 0.28, s * 0.42, s * 0.06);
+      const roll = (x, y, rot) => {
+        const L = s * 0.3, R = s * 0.1;
+        g.save(); g.translate(x, y); g.rotate(rot);
+        g.beginPath(); g.moveTo(-L + R, -R); g.lineTo(L - R, -R); g.arc(L - R, 0, R, -Math.PI / 2, Math.PI / 2); g.lineTo(-L + R, R); g.arc(-L + R, 0, R, Math.PI / 2, Math.PI * 1.5); g.closePath();
+        const lg = g.createLinearGradient(0, -R, 0, R); lg.addColorStop(0, "#8FAA55"); lg.addColorStop(0.5, "#6E8C3C"); lg.addColorStop(1, "#46622A"); g.fillStyle = lg; g.fill();
+        g.strokeStyle = "#3C5424"; g.lineWidth = s * 0.012; g.stroke();
+        g.strokeStyle = "rgba(214,232,160,0.55)"; g.lineWidth = s * 0.008;
+        for (let k = -3; k <= 3; k++) { g.beginPath(); g.moveTo(k * L * 0.26 - R * 0.6, -R * 0.8); g.lineTo(k * L * 0.26 + R * 0.5, R * 0.8); g.stroke(); }
+        g.fillStyle = "#5A7A33"; ell(g, L - R * 0.6, 0, R * 0.35, R * 0.75); g.fill();
+        g.restore();
+      };
+      roll(-s * 0.15, s * 0.13, 0.05); roll(s * 0.17, s * 0.15, -0.04); roll(0, -s * 0.06, 0.02);
+      g.fillStyle = radial(g, s * 0.3, -s * 0.2, s * 0.14, "#FFFFFF", "#E6E2DA"); ell(g, s * 0.32, -s * 0.18, s * 0.13, s * 0.08); g.fill();
+      g.fillStyle = "#4C8B3A"; for (const [x, y] of [[0.28, -0.2], [0.35, -0.16], [0.31, -0.13], [0.38, -0.21]]) { g.fillRect(x * s, y * s, s * 0.018, s * 0.012); }
+    },
+    pakhlava(g, s) { // ромбики пахлавы: слоёное тесто, мёд, грецкий орех
+      dishShadow(g, s * 0.24, s * 0.44, s * 0.06);
+      const piece = (x, y, w, h, t, nut) => {
+        g.beginPath(); g.moveTo(x - w, y); g.lineTo(x, y + h); g.lineTo(x + w, y); g.lineTo(x + w, y + t); g.lineTo(x, y + h + t); g.lineTo(x - w, y + t); g.closePath();
+        g.fillStyle = "#B8722A"; g.fill();
+        g.strokeStyle = "rgba(246,214,140,0.8)"; g.lineWidth = s * 0.008;
+        for (let k = 1; k < 4; k++) { const d = t * k / 4; g.beginPath(); g.moveTo(x - w, y + d); g.lineTo(x, y + h + d); g.lineTo(x + w, y + d); g.stroke(); }
+        g.beginPath(); g.moveTo(x, y - h); g.lineTo(x + w, y); g.lineTo(x, y + h); g.lineTo(x - w, y); g.closePath();
+        g.fillStyle = radial(g, x - w * 0.3, y - h * 0.4, w * 1.2, "#F3C46A", "#C98632"); g.fill();
+        g.strokeStyle = "#8F5520"; g.lineWidth = s * 0.012; g.stroke();
+        g.strokeStyle = "rgba(255,255,255,0.45)"; g.lineWidth = s * 0.01; g.beginPath(); g.moveTo(x - w * 0.6, y - h * 0.1); g.lineTo(x - w * 0.05, y - h * 0.7); g.stroke();
+        if (nut) { g.fillStyle = radial(g, x - w * 0.08, y - h * 0.1, w * 0.3, "#9A6233", "#5E3517"); ell(g, x, y, w * 0.25, h * 0.27); g.fill();
+          g.strokeStyle = "#3E2210"; g.lineWidth = s * 0.008; g.beginPath(); g.moveTo(x, y - h * 0.25); g.bezierCurveTo(x - w * 0.1, y - h * 0.05, x + w * 0.1, y + h * 0.05, x, y + h * 0.25); g.stroke(); }
+      };
+      piece(-s * 0.16, s * 0.04, s * 0.25, s * 0.17, s * 0.07, true);
+      piece(s * 0.19, -s * 0.07, s * 0.23, s * 0.16, s * 0.07, true);
+      g.fillStyle = "rgba(230,160,40,0.45)"; ell(g, s * 0.02, s * 0.2, s * 0.08, s * 0.025); g.fill();
+    },
+  };
+  // вышивка на крае скатерти (оголовке)
+  const STITCH = {
+    georgia(g, pw, y, b) {
+      for (let x = b * 2.5, k = 0; x < pw - b * 2; x += b * 2.2, k++) {
+        g.fillStyle = k % 2 ? "#1F2937" : "#C0262D";
+        g.beginPath(); g.moveTo(x, y - b * 0.9); g.lineTo(x + b * 0.8, y); g.lineTo(x, y + b * 0.9); g.lineTo(x - b * 0.8, y); g.closePath(); g.fill();
+      }
+    },
+    armenia(g, pw, y, b) {
+      for (let x = b * 2.5, k = 0; x < pw - b * 2; x += b * 2.2, k++) {
+        g.fillStyle = k % 2 ? "#E58A1F" : "#B3202E";
+        g.fillRect(x - b * 0.8, y - b * 0.22, b * 1.6, b * 0.44); g.fillRect(x - b * 0.22, y - b * 0.8, b * 0.44, b * 1.6);
+      }
+    },
+  };
+  function clothPipe(pw, capH, b, dishes, stitch, flip) {
+    return offscreen(pw, H, (g) => {
+      const bodyW = pw - b * 2, bc = Math.round(bodyW / b), cc = Math.round(pw / b);
+      const shade = (i, n) => { if (i === 0 || i === n - 1) return OUTLINE; const f = i / n; return f < 0.14 ? "#D9DCE1" : f < 0.32 ? "#FFFFFF" : f < 0.68 ? "#F6F5F1" : f < 0.86 ? "#E7E6E1" : "#CDD0D5"; };
+      for (let i = 0; i < bc; i++) { g.fillStyle = shade(i, bc); g.fillRect(b + i * b, capH, b + 0.5, H - capH); }
+      for (let i = 0; i < cc; i++) { g.fillStyle = shade(i, cc); g.fillRect(i * b, 0, b + 0.5, capH); }
+      g.fillStyle = OUTLINE; g.fillRect(0, 0, pw, b); g.fillRect(0, capH - b, pw, b);
+      g.fillStyle = "#D3D6DA"; g.fillRect(b * 2, capH, bodyW - b * 2, b * 0.6);
+      g.fillStyle = "rgba(110,120,140,0.07)"; // переплетение ткани
+      for (let y = capH + b; y < H; y += 3) g.fillRect(b * 2, y, bodyW - b * 2, 1);
+      for (let x = b * 2; x < b + bodyW - b; x += 3) g.fillRect(x, capH, 1, H - capH);
+      STITCH[stitch](g, pw, capH / 2, b);
+      const s = bodyW * 0.82, cx = pw / 2;
+      for (let y = capH + s * 0.72, k = 0; y - s < H; y += s * 1.3, k++) {
+        g.save(); g.translate(cx, y); if (flip) g.scale(1, -1);
+        DISHES[dishes[k % dishes.length]](g, s); g.restore();
+      }
+    });
   }
 
   function buildPipeSkins(pw, capH, b) {
@@ -1103,8 +1183,10 @@
       white: S((R, cw, ch, cr) => paintColumnPipe(R, cw, ch, cr, MARBLE)),
       blue: S((R, cw, ch, cr) => paintColumnPipe(R, cw, ch, cr, AEGEAN)),
       carpet: S(paintCarpetPipe),
-      food: S(paintFoodPipe),
-      cascade: S(paintCascadePipe),
+      tbilisi: clothPipe(pw, capH, b, ["khachapuri", "khinkali"], "georgia", false),
+      tbilisi_top: clothPipe(pw, capH, b, ["khinkali", "khachapuri"], "georgia", true),
+      yerevan: clothPipe(pw, capH, b, ["pomegranate", "dolma", "pakhlava"], "armenia", false),
+      yerevan_top: clothPipe(pw, capH, b, ["pakhlava", "pomegranate", "dolma"], "armenia", true),
     };
   }
 
@@ -1630,7 +1712,7 @@
       const pw = tex.pipe.w, sc = tex.pipe.width / pw;
       for (const p of this.pipes) {
         if (p.x + pw / 2 < 0 || p.x - pw / 2 > W) continue;
-      const pt = (tex.pipes && tex.pipes[p.skin]) || tex.pipe;
+      const pt = (tex.pipes && tex.pipes[p.skin]) || tex.pipe, ptTop = (tex.pipes && tex.pipes[p.skin + "_top"]) || pt; // у верхней колонны блюда не вверх ногами
         const bottom = p.gapY + p.gap / 2, top = p.gapY - p.gap / 2;
         const hb = Math.min(H, groundY + block - bottom), ht = Math.min(H, top + 2);
         if (hb > 0) ctx.drawImage(pt, 0, 0, pt.width, hb * sc, p.x - pw / 2, bottom, pw, hb);
@@ -1638,7 +1720,7 @@
           ctx.save();
           ctx.translate(p.x, top);
           ctx.scale(1, -1);
-          ctx.drawImage(pt, 0, 0, pt.width, ht * sc, -pw / 2, 0, pw, ht);
+          ctx.drawImage(ptTop, 0, 0, ptTop.width, ht * sc, -pw / 2, 0, pw, ht);
           ctx.restore();
         }
       }
