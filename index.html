@@ -959,12 +959,8 @@
       const lo = safeTop + margin + gap / 2;          // y-вниз: верхняя граница
       const hi = Math.max(lo, groundY - margin - gap / 2);
       let y = lo + Math.random() * (hi - lo);
-      // после CFG.moveFrom часть труб «оживает» и плавно ездит вверх-вниз
+      // подвижные трубы отключены — все трубы стоят на месте
       let move = null;
-      if (this.score >= CFG.moveFrom && Math.random() < Math.min(0.6, 0.3 + (this.score - CFG.moveFrom) * 0.01)) {
-        const amp = Math.min(30 * u, (hi - lo) / 2);
-        if (amp > 6 * u) move = { amp, w: 1.2 + Math.random() * 0.5, ph: Math.random() * Math.PI * 2 };
-      }
       if (move) y = Math.min(Math.max(y, lo + move.amp), hi - move.amp);
       if (this.lastGap !== null) {
         // максимальный перепад между соседними проёмами с учётом движения — чтобы всегда было проходимо
