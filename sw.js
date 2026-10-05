@@ -1,9 +1,9 @@
-const CACHE = "flappy-vanik-v3";
+const CACHE = "flappy-vanik-v4";
 const ASSETS = ["./", "index.html", "manifest.webmanifest", "vanik.png", "title.png",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((a) => new Request(a, { cache: "reload" })))).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
@@ -24,7 +24,8 @@ self.addEventListener("fetch", (e) => {
 
   // Страница — сначала сеть (чтобы обновления доходили сразу), офлайн — из кэша
   if (e.request.mode === "navigate" || (sameOrigin && (url.pathname.endsWith("/") || url.pathname.endsWith(".html")))) {
-    e.respondWith(fetch(e.request).then((res) => put(e.request, res))
+    // cache: "no-cache" — сверяемся с сервером, а не берём страницу из HTTP-кэша браузера (GitHub Pages даёт max-age=600)
+    e.respondWith(fetch(url.href, { cache: "no-cache", credentials: "same-origin" }).then((res) => put(e.request, res))
       .catch(() => caches.match(e.request).then((hit) => hit || caches.match("index.html"))));
     return;
   }
