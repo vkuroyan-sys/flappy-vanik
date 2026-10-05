@@ -58,13 +58,18 @@
   }
   .lb ol { list-style: none; margin: 0; padding: 0; font-size: 10px; line-height: 1; }
   .lb li {
-    display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: 8px;
+    display: grid; grid-template-columns: 30px 1fr 5ch 5ch; align-items: center; gap: 8px;
     padding: 8px 6px; border-radius: 6px;
   }
   .lb li:nth-child(odd) { background: rgba(227, 199, 116, 0.35); }
   .lb li.me { background: #FFD23F; }
   .lb li .r { color: #F07E2A; }
   .lb li .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb li .g { color: #6B5B2E; text-align: right; }
+.lb li .s { text-align: right; }
+.lb li.head { background: none; padding-top: 0; font-size: 7px; color: #6B5B2E; }
+.lb li.head .r { color: #6B5B2E; }
+.lb ol { max-height: 50vh; overflow: auto; }
   .lb-status { margin: 10px 0 0; min-height: 12px; font-size: 9px; line-height: 1.5; text-align: center; color: #6B5B2E; }
   .lb form { margin-top: 14px; padding-top: 14px; border-top: 3px dashed #E3C774; }
   .lb label { display: block; margin-bottom: 8px; font-size: 9px; color: #6B5B2E; }
@@ -111,6 +116,7 @@
 .sw::after { content: ""; position: absolute; top: 1px; left: 1px; width: 12px; height: 12px; border-radius: 4px; background: #C9CDD3; transition: left 0.15s, background 0.15s; }
 .opt.on .sw { background: #FFD23F; }
 .opt.on .sw::after { left: 19px; background: #6CC64A; }
+.opt { touch-action: manipulation; }
 .opt:focus-visible { outline: 3px solid #4EA8DE; outline-offset: 2px; }
 </style>
 </head>
@@ -121,7 +127,7 @@
 <div id="lb" class="lb" hidden>
   <div class="lb-card" role="dialog" aria-modal="true" aria-labelledby="lb-title">
     <button class="lb-x" id="lb-close" type="button" aria-label="Закрыть">✕</button>
-    <h2 id="lb-title">🏆 ТОП ИГРОКОВ</h2>
+    <h2 id="lb-title">🏆 ВСЕ ИГРОКИ</h2>
     <ol id="lb-list"></ol>
     <p class="lb-status" id="lb-status"></p>
     <form id="lb-form" autocomplete="off">
@@ -154,7 +160,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.12";
+  const VERSION = "1.13";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 178, minGap: 148,
@@ -2107,7 +2113,7 @@
         if (!e || typeof e.id !== "string" || seen.has(e.id)) continue;
         const s = Math.floor(Number(e.s)), n = this.cleanName(e.n);
         if (!n || !(s > 0 && s < 100000)) continue;
-        seen.add(e.id); out.push({ id: e.id.slice(0, 16), n, s, t: Number(e.t) || 0 });
+        seen.add(e.id); out.push({ id: e.id.slice(0, 16), n, s, t: Number(e.t) || 0, g: Math.max(0, Math.floor(Number(e.g)) || 0) });
       }
       return out.sort((a, b) => b.s - a.s || a.t - b.t);
     },
@@ -2124,29 +2130,39 @@
       } finally { clearTimeout(timer); }
     },
     async load() {
-      const d = await this.request("GET", '/scores.json?orderBy=%22s%22&limitToLast=100');
+      const d = await this.request("GET", "/scores.json"); // все, кто когда-либо попадал в таблицу
       return this.clean(Object.entries(d || {}).map(([id, e]) => ({ id, ...e })));
     },
     // Каждый игрок пишет только свою строку. Правила базы не дают понизить рекорд или удалить запись.
+    games() { return parseInt(store.get("gamesPlayed", "0"), 10) || 0; },
+    // запись игрока: имя, рекорд, время и счётчик игр (рекорд и счётчик в базе никогда не уменьшаются)
     async submit(score) {
-      const path = `/scores/${this.id}.json`;
-      try {
-        await this.request("PUT", path, { n: this.name, s: score, t: Date.now() });
-      } catch (e) {
+      const path = `/scores/${this.id}.json`, games = this.games();
+      const put = (s, g) => this.request("PUT", path, this.noG ? { n: this.name, s, t: Date.now() } : { n: this.name, s, t: Date.now(), g });
+      try { await put(score, games); }
+      catch (e) {
         if (e.status !== 401 && e.status !== 403) throw e;
-        // в таблице уже рекорд выше — просто обновляем имя
-        const cur = await this.request("GET", path);
-        if (!cur || !(cur.s >= score)) throw e;
-        if (cur.n !== this.name) await this.request("PUT", path, { n: this.name, s: cur.s, t: Date.now() });
-        score = cur.s;
+        const cur = (await this.request("GET", path)) || {};
+        const s = Math.max(score, Number(cur.s) || 0), g = Math.max(games, Number(cur.g) || 0);
+        try { await put(s, g); }
+        catch (e2) {
+          if (this.noG || (e2.status !== 401 && e2.status !== 403)) throw e2;
+          this.noG = true; await put(s, g); // правила базы ещё не знают про счётчик игр — пишем по-старому
+        }
+        score = s;
       }
       this.markSent(score);
       return this.load();
     },
     markSent(s) { this.sent = Math.max(this.sent, s); store.set("lbSent", String(this.sent)); },
+    // после каждой игры: обновляем рекорд и счётчик игр (если игрок указал имя)
     submitBest(best) {
-      if (!this.name || !(best > this.sent) || this.busy) return this.busy;
-      this.busy = this.submit(best).catch(() => null).finally(() => { this.busy = null; });
+      if (!this.name || !(best > 0)) return this.busy;
+      if (this.busy) { this.again = best; return this.busy; }
+      this.busy = this.submit(best).catch(() => null).finally(() => {
+        this.busy = null;
+        if (this.again) { const b = this.again; this.again = 0; this.submitBest(b); }
+      });
       return this.busy;
     },
   };
@@ -2181,23 +2197,24 @@
     renderMe() {
       const best = game ? game.best : 0;
       this.me.textContent = Leaderboard.name
-        ? `ТВОЙ РЕКОРД: ${best}. В ТАБЛИЦЕ КАК «${Leaderboard.name}».`
+        ? `ТВОЙ РЕКОРД: ${best}, СЫГРАНО ИГР: ${Leaderboard.games()}. В ТАБЛИЦЕ КАК «${Leaderboard.name}».`
         : best > 0 ? `ВВЕДИ ИМЯ, ЧТОБЫ ПОПАСТЬ В ТОП С РЕКОРДОМ ${best}.` : "СЫГРАЙ И ВВЕДИ ИМЯ, ЧТОБЫ ПОПАСТЬ В ТОП.";
       this.save.textContent = Leaderboard.name ? "ОК" : "В ТОП";
     },
     render(list) {
       this.list.textContent = "";
-      const top = list.slice(0, 10);
-      top.forEach((e, i) => this.list.appendChild(this.row(i + 1, e)));
-      const myIdx = list.findIndex(e => e.id === Leaderboard.id);
-      if (myIdx >= 10) this.list.appendChild(this.row(myIdx + 1, list[myIdx]));
-      this.status.textContent = list.length ? "" : "ПОКА ПУСТО — СТАНЬ ПЕРВЫМ!";
+      if (list.length) this.list.appendChild(this.row("#", { n: "ИГРОК", g: "ИГР", s: "ОЧКИ", head: true }));
+      list.forEach((e, i) => this.list.appendChild(this.row(i + 1, e)));
+      this.status.textContent = list.length ? `ВСЕГО ИГРОКОВ: ${list.length}` : "ПОКА ПУСТО — СТАНЬ ПЕРВЫМ!";
+      const me = this.list.querySelector(".me");
+      if (me) me.scrollIntoView({ block: "nearest" });
     },
     row(rank, e) {
       const li = document.createElement("li");
-      if (e.id === Leaderboard.id) li.className = "me";
-      const medal = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : String(rank);
-      for (const [cls, txt] of [["r", medal], ["n", e.n], ["s", String(e.s)]]) {
+      if (e.head) li.className = "head"; else if (e.id === Leaderboard.id) li.className = "me";
+      const medal = e.head ? rank : rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : String(rank);
+      const g = e.head ? e.g : e.g > 0 ? String(e.g) : "—";
+      for (const [cls, txt] of [["r", medal], ["n", e.n], ["g", g], ["s", String(e.s)]]) {
         const span = document.createElement("span"); span.className = cls; span.textContent = txt; li.appendChild(span);
       }
       return li;
@@ -2318,7 +2335,7 @@
     }
   });
   ["touchstart", "touchmove", "gesturestart", "dblclick"].forEach(ev =>
-    document.addEventListener(ev, (e) => { if (!modalOpen()) e.preventDefault(); }, { passive: false }));
+    document.addEventListener(ev, (e) => { if (!modalOpen() && !(e.target && e.target.closest && e.target.closest("#opts"))) e.preventDefault(); }, { passive: false }));
   // автопауза, когда игру свернули или переключили вкладку/окно; звук на это время засыпает
   document.addEventListener("visibilitychange", () => {
     last = performance.now();
