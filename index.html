@@ -1531,11 +1531,11 @@
       while (this.sched.length <= k) this.sched.push(this.nextRegion(this.sched.length ? this.sched[this.sched.length - 1] : 0));
       return this.sched[k];
     }
-    // отделка колонны: свой стиль у каждого города; в Санторини 3 белых, затем 2 синих
+    // отделка колонны: свой стиль у каждого города; в Санторини белая и синяя по очереди
     pipeSkin(sc) {
       const s = PIPE_SKIN[this.regionAt(sc)];
       if (s !== "santorini") return s;
-      return ((sc - CFG.regionFrom) % CFG.regionEvery) % 5 < 3 ? "white" : "blue";
+      return ((sc - CFG.regionFrom) % CFG.regionEvery) % 2 ? "blue" : "white";
     }
 
     collide() {
