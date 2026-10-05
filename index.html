@@ -99,6 +99,19 @@
   }
   .lb input[type="range"]:focus-visible { outline: 3px solid #4EA8DE; outline-offset: 3px; }
   .vol-hint { margin: 16px 0 0; font-size: 8px; line-height: 1.6; color: #6B5B2E; text-align: center; }
+/* ---------- Режимы на стартовом экране ---------- */
+.opts { position: fixed; z-index: 5; display: flex; justify-content: center; gap: 8px; box-sizing: border-box; padding: 0 8px; pointer-events: none; }
+.opts[hidden] { display: none; }
+.opt {
+  pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 7px 8px 8px; cursor: pointer;
+  border: 3px solid #14213D; border-radius: 10px; background: #FFF1C1; color: #14213D; box-shadow: 0 3px 0 rgba(20, 33, 61, 0.35);
+  font: 7px "Press Start 2P", "Arial Black", system-ui, sans-serif; line-height: 1;
+}
+.sw { position: relative; display: block; width: 38px; height: 20px; box-sizing: border-box; border: 3px solid #14213D; border-radius: 10px; background: #fff; }
+.sw::after { content: ""; position: absolute; top: 1px; left: 1px; width: 12px; height: 12px; border-radius: 4px; background: #C9CDD3; transition: left 0.15s, background 0.15s; }
+.opt.on .sw { background: #FFD23F; }
+.opt.on .sw::after { left: 19px; background: #6CC64A; }
+.opt:focus-visible { outline: 3px solid #4EA8DE; outline-offset: 2px; }
 </style>
 </head>
 <body>
@@ -132,17 +145,23 @@
     <p class="vol-hint">НА КОМПЬЮТЕРЕ: M — ВЫКЛ/ВКЛ ЗВУК</p>
   </div>
 </div>
+<div id="opts" class="opts" hidden>
+  <button class="opt" type="button" role="switch" data-k="cities"><span>ГОРОДА</span><span class="sw"></span></button>
+  <button class="opt" type="button" role="switch" data-k="daynight"><span>ДЕНЬ/НОЧЬ</span><span class="sw"></span></button>
+  <button class="opt" type="button" role="switch" data-k="seasons"><span>СЕЗОНЫ</span><span class="sw"></span></button>
+</div>
 <script>
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.10";
+  const VERSION = "1.11";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 178, minGap: 148,
     birdHeight: 70, hitRadius: 22,
     regionFrom: 6,    // до этого счёта — Зелёная долина, дальше случайные города
     regionEvery: 10,  // смена города каждые N труб
+    seasonEvery: 15,  // смена времени года каждые N очков
     themeEvery: 20,   // смена времени суток каждые N очков
   };
   // Онлайн-таблица рекордов (Firebase Realtime Database, REST)
@@ -154,6 +173,12 @@
 
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d", { alpha: false });   // непрозрачный холст — быстрее композитинг
+  // режимы игры (переключатели на стартовом экране), сохраняются в localStorage
+  const OPT = {
+    cities: (() => { try { return localStorage.getItem("optCities") !== "0"; } catch { return true; } })(),
+    daynight: (() => { try { return localStorage.getItem("optDayNight") !== "0"; } catch { return true; } })(),
+    seasons: (() => { try { return localStorage.getItem("optSeasons") !== "0"; } catch { return true; } })(),
+  };
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch {} },
@@ -601,6 +626,13 @@
     { top: "#2F9BEF", bottom: "#8ED6FB", cloud: "#fff", cloudShade: "#CDEBFB", tint: null },
     { top: "#5B4B9A", mid: "#F2727F", bottom: "#FFC37A", cloud: "#FFE3D1", cloudShade: "#F7B5A8", tint: "rgba(150,50,70,0.16)" },
     { top: "#0B1638", bottom: "#2E4A86", cloud: "#5A6E9E", cloudShade: "#43578A", tint: "rgba(10,18,52,0.48)", stars: true },
+  ];
+  // Времена года: оттенок пейзажа, цвет травы и то, что падает с неба
+  const SEASONS = [
+    { msg: "ЛЕТО", overlay: null, fall: null },
+    { msg: "НАСТУПИЛА ОСЕНЬ", overlay: "rgba(255,130,30,0.16)", fall: ["#E07A1F", "#C8461E", "#F2B134", "#A8532A"] },
+    { msg: "НАСТУПИЛА ЗИМА", overlay: "rgba(225,238,255,0.3)", fall: ["#FFFFFF", "#EAF4FF"] },
+    { msg: "НАСТУПИЛА ВЕСНА", overlay: "rgba(255,190,220,0.1)", fall: ["#FFC1DA", "#FF9CC2", "#FFFFFF"] },
   ];
   function buildSky(def, b) {
     return offscreen(W, H, (g) => {
@@ -1238,13 +1270,19 @@
       }
     });
 
-    tex.ground = offscreen(tileW, groundTop, (g) => {
+    // земля по временам года: лето, осень, зима, весна
+    tex.grounds = [
+      ["#6BD13F", "#58B532", "#3F8A24", null],
+      ["#E0A93E", "#CC8F2E", "#8A5A1E", "#C8461E"],
+      ["#FFFFFF", "#E3EEF8", "#B7CBE0", null],
+      ["#7EDB4F", "#69C845", "#3F8A24", "#FF9CC2"],
+    ].map(([g1, g2, gd, dot]) => offscreen(tileW, groundTop, (g) => {
       const cols = Math.round(tileW / b), rows = Math.round(groundTop / b) + 1;
       for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
         let col;
         if (r === 0) col = OUTLINE;
-        else if (r <= 3) col = (Math.floor(c / 2) + r) % 2 === 0 ? "#6BD13F" : "#58B532";
-        else if (r === 4) col = "#3F8A24";
+        else if (r <= 3) col = dot && r <= 2 && (c * 5 + r * 3) % 17 === 0 ? dot : (Math.floor(c / 2) + r) % 2 === 0 ? g1 : g2;
+        else if (r === 4) col = gd;
         else if (r === 5) col = "#5E3A1A";
         else {
           const checker = (Math.floor(c / 2) + Math.floor(r / 2)) % 2 === 0;
@@ -1252,7 +1290,8 @@
         }
         rect(g, col, c * b, r * b, b + 0.5, b + 0.5);
       }
-    });
+    }));
+    tex.ground = tex.grounds[0];
 
     const bodyW = Math.round(CFG.pipeWidth * u / b) * b, over = b, capH = b * 7, pw = bodyW + over * 2;
     tex.pipeBody = bodyW; tex.pipeCapH = capH;
@@ -1372,8 +1411,9 @@
       this.buttons = [];
       this.particles = [];
       this.sky = { from: 0, to: 0, t: 1 };
+      this.season = { from: 0, to: 0, t: 1 }; this.weather = [];
       // после проигрыша продолжаем в том же городе и с его музыкой (при запуске — Зелёная долина)
-      const keep = this.region ? this.region.to : 0;
+      const keep = this.region && OPT.cities ? this.region.to : 0;
       this.startRegion = keep;
       this.region = { from: keep, to: keep, t: 1 };
       this.regionBag = []; this.sched = []; this.spawned = 0;
@@ -1551,6 +1591,7 @@
       }
       this.sky.t = Math.min(1, this.sky.t + dt / 1.6);
       this.region.t = Math.min(1, this.region.t + dt / 1.2);
+      this.season.t = Math.min(1, this.season.t + dt / 1.5); this.updateWeather(dt);
       if (this.banner) { this.banner.t += dt; if (this.banner.t > 2.6) this.banner = null; }
       this.updateParticles(dt);
 
@@ -1608,14 +1649,46 @@
     onPoint() {
       this.score++; this.scorePop = 1; Audio.play("point");
       this.burst(this.birdX + 6 * u, this.bird.y, 7, { colors: ["#FFD23F", "#FFFFFF"], speed: [60, 170], size: [3, 6], life: [0.3, 0.55], g: 200 });
-      const theme = Math.floor(this.score / CFG.themeEvery) % SKIES.length;
+      const theme = OPT.daynight ? Math.floor(this.score / CFG.themeEvery) % SKIES.length : 0;
       if (theme !== this.sky.to) this.sky = { from: this.sky.to, to: theme, t: 0 };
+      const season = OPT.seasons ? Math.floor(this.score / CFG.seasonEvery) % SEASONS.length : 0;
+      if (season !== this.season.to) { this.season = { from: this.season.to, to: season, t: 0 }; toast(SEASONS[season].msg, 2); }
       // первые очки — Зелёная долина, дальше каждые 10 труб случайный город
-      if (this.score >= CFG.regionFrom && (this.score - CFG.regionFrom) % CFG.regionEvery === 0) {
+      if (OPT.cities && this.score >= CFG.regionFrom && (this.score - CFG.regionFrom) % CFG.regionEvery === 0) {
         const region = this.regionAt(this.score);
         this.region = { from: this.region.to, to: region, t: 0 };
         this.banner = { text: REGIONS[region].name, t: 0 };
         Music.setTheme(region);
+      }
+    }
+
+    // переключатели режимов: применяем сразу, прямо на стартовом экране
+    applyOptions() {
+      this.sched = []; this.regionBag = [];
+      if (!OPT.cities && this.region.to !== 0) { this.region = { from: this.region.to, to: 0, t: 0 }; Music.setTheme(0); }
+      this.startRegion = this.region.to;
+      if (!OPT.daynight && this.sky.to !== 0) this.sky = { from: this.sky.to, to: 0, t: 0 };
+      if (!OPT.seasons && this.season.to !== 0) this.season = { from: this.season.to, to: 0, t: 0 };
+    }
+    // листья, снег, лепестки
+    updateWeather(dt) {
+      const fall = SEASONS[this.season.to].fall, snow = this.season.to === 2;
+      if (fall && this.weather.length < 46 && Math.random() < dt * 30) {
+        this.weather.push({
+          x: Math.random() * (W + 40) - 20, y: -10, vy: (snow ? 35 : 55) * u * (0.6 + Math.random() * 0.8), vx: (snow ? -6 : -14) * u,
+          sw: (snow ? 14 : 26) * u, ws: 1 + Math.random() * 2, ph: Math.random() * 6, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 4,
+          size: (snow ? 3 + Math.random() * 3 : 4 + Math.random() * 3) * u, c: fall[Math.floor(Math.random() * fall.length)], leaf: !snow,
+        });
+      }
+      const drift = this.state === "playing" ? CFG.speed * u * 0.3 : 0;
+      for (const f of this.weather) { f.y += f.vy * dt; f.x += (f.vx + Math.sin(this.t * f.ws + f.ph) * f.sw - drift) * dt; f.rot += f.vr * dt; }
+      this.weather = this.weather.filter(f => f.y < groundY + 8 && f.x > -30 && f.x < W + 30);
+    }
+    drawWeather() {
+      for (const f of this.weather) {
+        ctx.fillStyle = f.c;
+        if (f.leaf) { ctx.save(); ctx.translate(f.x, f.y); ctx.rotate(f.rot); ctx.fillRect(-f.size / 2, -f.size / 4, f.size, f.size / 2); ctx.restore(); }
+        else ctx.fillRect(f.x - f.size / 2, f.y - f.size / 2, f.size, f.size);
       }
     }
 
@@ -1632,6 +1705,7 @@
 
     // город для трубы/очка с номером sc: расписание смены городов строится заранее
     regionAt(sc) {
+      if (!OPT.cities) return 0;
       if (sc < CFG.regionFrom) return this.startRegion;
       const k = Math.floor((sc - CFG.regionFrom) / CFG.regionEvery);
       while (this.sched.length <= k) this.sched.push(this.nextRegion(this.sched.length ? this.sched[this.sched.length - 1] : this.startRegion));
@@ -1731,12 +1805,17 @@
 
       // трубы: рисуем только видимую часть текстуры
       const pw = tex.pipe.w, sc = tex.pipe.width / pw;
+      const sea = this.season, seaT = easeOut(sea.t), snowA = sea.to === 2 ? (sea.from !== 2 && sea.t < 1 ? seaT : 1) : (sea.from === 2 && sea.t < 1 ? 1 - seaT : 0);
       for (const p of this.pipes) {
         if (p.x + pw / 2 < 0 || p.x - pw / 2 > W) continue;
       const pt = (tex.pipes && tex.pipes[p.skin]) || tex.pipe, ptTop = (tex.pipes && tex.pipes[p.skin + "_top"]) || pt; // у верхней колонны блюда не вверх ногами
         const bottom = p.gapY + p.gap / 2, top = p.gapY - p.gap / 2;
         const hb = Math.min(H, groundY + block - bottom), ht = Math.min(H, top + 2);
         if (hb > 0) ctx.drawImage(pt, 0, 0, pt.width, hb * sc, p.x - pw / 2, bottom, pw, hb);
+        if (snowA > 0 && hb > 0) { // зимой на колоннах лежит снег
+          ctx.globalAlpha = snowA; ctx.fillStyle = "#FFFFFF"; ctx.fillRect(p.x - pw / 2, bottom - 3 * u, pw, 4 * u);
+          ctx.fillStyle = "#E3EEF8"; ctx.fillRect(p.x - pw / 2 + 5 * u, bottom + u, 7 * u, 3 * u); ctx.fillRect(p.x + pw / 4, bottom + u, 5 * u, 2 * u); ctx.globalAlpha = 1;
+        }
         if (ht > 0) {
           ctx.save();
           ctx.translate(p.x, top);
@@ -1745,7 +1824,15 @@
           ctx.restore();
         }
       }
-      this.drawTiles(tex.ground, this.scroll.ground, groundY);
+      { // время года: оттенок, осадки, трава
+        const se = this.season, sa = easeOut(se.t), seF = se.to !== se.from && se.t < 1, ov = (i) => SEASONS[i].overlay;
+        if (ov(se.to)) { ctx.globalAlpha = seF ? sa : 1; ctx.fillStyle = ov(se.to); ctx.fillRect(0, 0, W, groundY); }
+        if (seF && ov(se.from)) { ctx.globalAlpha = 1 - sa; ctx.fillStyle = ov(se.from); ctx.fillRect(0, 0, W, groundY); }
+        ctx.globalAlpha = 1;
+        this.drawWeather();
+        this.drawTiles(tex.grounds[seF ? se.from : se.to], this.scroll.ground, groundY);
+        if (seF && sa > 0) { ctx.globalAlpha = sa; this.drawTiles(tex.grounds[se.to], this.scroll.ground, groundY); ctx.globalAlpha = 1; }
+      }
       this.drawParticles(false);
       this.drawBird();
       ctx.restore();
@@ -2179,6 +2266,34 @@
   };
   VolUI.init();
   const modalOpen = () => LBUI.isOpen || VolUI.isOpen;
+  // ---------- Переключатели режимов ----------
+  const OptUI = {
+    el: document.getElementById("opts"),
+    keys: { cities: "optCities", daynight: "optDayNight", seasons: "optSeasons" },
+    init() {
+      for (const b of this.el.querySelectorAll(".opt")) {
+        const k = b.dataset.k, sync = () => { b.classList.toggle("on", OPT[k]); b.setAttribute("aria-checked", OPT[k] ? "true" : "false"); };
+        sync();
+        b.addEventListener("click", () => {
+          OPT[k] = !OPT[k]; store.set(this.keys[k], OPT[k] ? "1" : "0"); sync(); b.blur();
+          Audio.unlock(); Audio.play("swoosh");
+          if (game) game.applyOptions();
+        });
+      }
+      window.addEventListener("resize", () => this.place());
+    },
+    place() {
+      if (this.el.hidden) return;
+      const r = canvas.getBoundingClientRect(), h = this.el.offsetHeight || 56;
+      this.el.style.left = r.left + "px"; this.el.style.width = W + "px";
+      this.el.style.top = Math.round(r.top + groundY + Math.max(4, (groundTop - safeBottom - h) / 2)) + "px";
+    },
+    update() {
+      const show = !!game && game.state === "ready" && !modalOpen();
+      if (this.el.hidden === show) { this.el.hidden = !show; this.place(); }
+    },
+  };
+  OptUI.init();
 
   // ---------- Ввод ----------
   function pointer(e) {
@@ -2189,6 +2304,7 @@
   }
   canvas.addEventListener("pointerdown", pointer, { passive: false });
   document.addEventListener("keydown", (e) => {
+    if (e.target && e.target.closest && e.target.closest("#opts")) return; // пробел на переключателе не запускает игру
     if (modalOpen()) {   // не мешаем вводить имя и двигать ползунки
       if (e.code === "Escape") { LBUI.isOpen && LBUI.close(); VolUI.isOpen && VolUI.close(); }
       return;
@@ -2226,6 +2342,7 @@
   // ---------- Цикл ----------
   let last = performance.now();
   function frame(now) {
+    OptUI.update();
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
     if (game) {
@@ -2261,7 +2378,6 @@
     document.getElementById("loading").remove();
     // «что нового» — один раз для тех, кто уже играл в прошлую версию
     if (store.get("seenVersion", "") !== VERSION) {
-      if (game.best > 0) toast("НОВОЕ: ГОРОДА, МУЗЫКА, ГРОМКОСТЬ!", 4);
       store.set("seenVersion", VERSION);
     }
     requestAnimationFrame(frame);
