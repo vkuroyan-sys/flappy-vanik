@@ -160,11 +160,11 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.15";
+  const VERSION = "1.16";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 178, minGap: 148,
-    birdHeight: 70, hitRadius: 22,
+    birdHeight: 50, hitRadius: 22,  // персонаж поменьше — проходить проёмы легче
     regionFrom: 6,    // до этого счёта — Зелёная долина, дальше случайные города
     regionEvery: 10,  // смена города каждые N труб
     seasonEvery: 15,  // смена времени года каждые N очков
