@@ -160,7 +160,7 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.21";
+  const VERSION = "1.22";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
     pipeWidth: 70, pipeSpacing: 235, baseGap: 185, minGap: 185,
@@ -297,6 +297,8 @@
     bakuLead: { harm: [1, 0.78, 0.55, 0.34, 0.2, 0.16, 0.08, 0.03, 0.02, 0.01], cut: 7000, v: 0.08, vib: 10, bend: 0.97, att: 0.02 },
     // скрипка: смычок (мягкая атака), глубокое вибрато, богатые обертоны
     violin: { harm: [1, 0.62, 0.52, 0.4, 0.3, 0.22, 0.15, 0.1, 0.06, 0.04], cut: 6500, v: 0.085, vib: 22, bend: 0.975, att: 0.035 },
+    // най: дыхание и мягкая атака, лёгкое вибрато
+    ney: { harm: [1, 0.35, 0.18, 0.08, 0.04, 0.02], cut: 5200, v: 0.13, vib: 9, bend: 0.985, att: 0.06 },
     tbLead: { harm: [1, 0.58, 0.27, 0.12, 0.04, 0.08, 0.02, 0.02, 0.01, 0.01], cut: 7000, v: 0.1, vib: 8, bend: 0.98, att: 0.04 },
   };
   const THEMES = [
@@ -399,6 +401,19 @@
         const B7 = [[0, 81, 2], [4, 74, 2], [6, 84, 2], [8, 83, 2], [10, 81, 2]];
         return [A1, A2, A1, A2, A5, A2, A5, A2, A9, A2, A9, A2, B1, B2, B3, B4, B5, B6, B7, A2];
       })(),
+    },
+    { // Дубай: арабская мелодия в ладу хиджаз (ре–ми♭–фа#–соль–ля–си♭–до), най, уд и дарбука в ритме «максум»
+      bpm: 112, len: 16, gain: 0.85, voice: "ney", bass: "oud", tonic: 50, arp: false, drum: "maqsum", chords: [CH.A],
+      lead: [
+        [[0, 74, 2], [2, 75, 2], [4, 78, 4], [8, 79, 2], [10, 78, 2], [12, 75, 2], [14, 74, 2]],
+        [[0, 75, 2], [2, 74, 2], [4, 75, 2], [6, 78, 2], [8, 79, 6], [14, 81, 2]],
+        [[0, 82, 4], [4, 81, 2], [6, 79, 2], [8, 78, 4], [12, 75, 2], [14, 74, 2]],
+        [[0, 74, 2], [2, 75, 2], [4, 74, 2], [6, 72, 2], [8, 74, 8]],
+        [[0, 86, 4], [4, 84, 2], [6, 82, 2], [8, 81, 4], [12, 79, 2], [14, 78, 2]],
+        [[0, 79, 2], [2, 81, 2], [4, 82, 2], [6, 81, 2], [8, 79, 2], [10, 78, 2], [12, 75, 2], [14, 78, 2]],
+        [[0, 79, 3], [3, 78, 1], [4, 75, 2], [6, 74, 2], [8, 75, 2], [10, 78, 2], [12, 79, 2], [14, 81, 2]],
+        [[0, 79, 2], [2, 78, 2], [4, 75, 2], [6, 74, 2], [8, 74, 8]],
+      ],
     },
   ];
   const Music = {
@@ -552,6 +567,11 @@
         if (!hot) { if (pos === 0) tom(100, 0.3); return; }
         if (sub === 0) { tom(100, beat === 0 ? 0.9 : 0.55); if (beat & 1) slap(0.2); }
         if (sub === 8) slap(0.11);
+      } else if (kind === "maqsum") { // максум: дум – тэк – – тэк, дум – – тэк
+        if (!hot) { if (pos === 0 || pos === 8) tom(110, 0.3); return; }
+        if (pos === 0 || pos === 8) tom(120, 0.8);
+        if (pos === 2 || pos === 6 || pos === 12) slap(0.24);
+        if (pos === 10 || pos === 14) slap(0.1);
       } else if (kind === "daouli") { // давул: 7/16 = 3+2+2
         if (!hot) { if (pos === 0 || pos === 7) tom(95, 0.3); return; }
         if (pos === 0 || pos === 7) tom(95, 0.85);
@@ -565,6 +585,9 @@
       const [root, chord] = T.chords[bar % T.chords.length];
       if (T.bass === "drone") { // дам: тянущийся бурдон на тонике
         if (pos === 0) { this.osc("triangle", this.freq(T.tonic), t, sp * len, 0.3); this.osc("sine", this.freq(T.tonic + 7), t, sp * len, 0.1); }
+      } else if (T.bass === "oud") { // уд: щипок по тонике и квинте в ритме максум
+        const pl = (n, v) => { this.osc("triangle", this.freq(n), t, sp * 2.4, v); this.osc("sawtooth", this.freq(n), t, sp * 1.2, v * 0.12); };
+        if (pos === 0 || pos === 8) pl(T.tonic, 0.5); else if (pos === 6 || pos === 12) pl(T.tonic + 7, 0.3); else if (pos === 3 || pos === 14) pl(T.tonic + 12, 0.18);
       } else if (T.bass === "oompah") { // «ум-па»: бас на сильные доли, аккорд на слабые
         if (pos === 0 || pos === 8) this.osc("triangle", this.freq(root + (pos === 8 ? 7 : 0)), t, sp * 2.2, 0.45);
         if (pos === 4 || pos === 12) for (const n of chord.slice(0, 3)) this.osc("square", this.freq(n), t, sp * 0.9, 0.03);
@@ -707,6 +730,7 @@
     { name: "ЕРЕВАН", clouds: true },
     { name: "БАКУ", clouds: false },
     { name: "ТБИЛИСИ", clouds: false },
+    { name: "ДУБАЙ", clouds: false },
   ];
   const seeded = (s) => () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
   // Затемнённые под закат/ночь копии слоёв: строятся один раз при смене времени суток, а не каждый кадр
@@ -1059,6 +1083,96 @@
     row(ab + 9, cw);
   }
 
+  // Дубай: небоскрёбы (Бурдж-Халифа, Бурдж-эль-Араб, башни Эмирейтс) над пустыней
+  function paintDubaiFar(R, cw, hc) {
+    const rnd = seeded(53);
+    const GL = ["#8FA9C2", "#7F9BB8", "#9DB6CC", "#86A2BF"], GLD = "#6C86A3", WIN = "#C3D6E6", SAND = "#E3C48C", HAZE = "#EBD6A8";
+    const tower = (x, w, h, col) => {
+      R(col, x, hc - 3 - h, w, h); R(GLD, x + w - 1, hc - 3 - h, 1, h); R("#D8E6F1", x, hc - 3 - h, 1, h);
+      for (let y = hc - 3 - h + 2; y < hc - 4; y += 3) for (let xx = x + 1; xx < x + w - 1; xx += 2) if (rnd() < 0.55) R(WIN, xx, y);
+    };
+    // фоновая застройка
+    for (let x = 1; x < cw - 4;) {
+      const w = 4 + Math.floor(rnd() * 4), h = 12 + Math.floor(rnd() * 22);
+      tower(x, w, h, GL[Math.floor(rnd() * GL.length)]);
+      x += w + (rnd() < 0.4 ? 1 : 0);
+    }
+    // башни Эмирейтс: две призмы со скошенным верхом
+    const em = Math.round(cw * 0.36);
+    for (const [dx, h] of [[0, 46], [7, 38]]) {
+      const x0 = em + dx, w = 5;
+      R("#A9BED2", x0, hc - 3 - h, w, h); R(GLD, x0 + w - 1, hc - 3 - h, 1, h); R("#D8E6F1", x0, hc - 3 - h, 1, h);
+      for (let i = 0; i < 4; i++) R("#A9BED2", x0 + i, hc - 3 - h - 1 - (i < 2 ? i + 1 : 4 - i), 1, 1);
+      R("#C9D8E6", x0 + 2, hc - 3 - h - 8, 1, 5);
+      for (let y = hc - 3 - h + 2; y < hc - 4; y += 3) R(WIN, x0 + 1, y, 2, 1);
+    }
+    // Бурдж-Халифа: ступенчатая «ёлочка» со шпилем
+    const bk = Math.round(cw * 0.66), TW = "#B4C7D8", TS = "#8FA6BC", TL = "#E3EDF5";
+    let y = hc - 3;
+    for (const [w, h] of [[11, 14], [9, 12], [7, 12], [5, 12], [3, 12]]) {
+      y -= h;
+      R(TW, bk - (w >> 1), y, w, h); R(TL, bk - (w >> 1), y, 1, h); R(TS, bk + (w >> 1), y, 1, h);
+      for (let yy = y + 2; yy < y + h - 1; yy += 3) R("#7F98B0", bk - (w >> 1) + 2, yy, w - 4, 1);
+    }
+    R(TW, bk, y - 12, 1, 12); R(TL, bk, y - 13);
+    // Бурдж-эль-Араб: «парус» на острове
+    const ba = Math.round(cw * 0.12), bh = 44;
+    R("#D9B97A", ba - 9, hc - 4, 20, 2);
+    for (let i = 0; i < bh; i++) {
+      const wr = Math.round(11 * Math.sin(Math.PI / 2 * Math.min(1, (i + 4) / bh * 1.05)));
+      const yy = hc - 4 - i;
+      R(i % 7 === 3 ? "#CFE0EE" : "#F4F6F8", ba - 5, yy, wr + 1, 1);
+      R("#C8D3DD", ba - 5 + wr, yy);
+    }
+    R("#B8C6D4", ba - 6, hc - 4 - bh, 1, bh); R("#B8C6D4", ba - 6, hc - 4 - bh - 5, 1, 5);
+    R("#C8D3DD", ba + 7, hc - 12, 4, 8); // вертолётная площадка
+    // дымка и песок у горизонта
+    R(HAZE, 0, hc - 5, cw, 2); R(SAND, 0, hc - 3, cw, 3);
+  }
+
+  function paintDubaiNear(R, cw, hc) {
+    const rnd = seeded(71), SAND = "#E8C98A", SL = "#F5DDA4", SD = "#D2AE6C";
+    const dune = (x) => 7 + 3.2 * Math.sin(2 * Math.PI * 2 * x / cw + 0.6) + 1.8 * Math.sin(2 * Math.PI * 5 * x / cw + 1.9);
+    for (let x = 0; x < cw; x++) {
+      const h = Math.round(dune(x));
+      R(SAND, x, hc - h, 1, h); R(SL, x, hc - h); R(SD, x, hc - Math.max(1, h - 3), 1, 2);
+    }
+    // пальмы
+    const palm = (x, h, lean) => {
+      const base = hc - Math.round(dune(x)) + 1;
+      let tx = x;
+      for (let i = 0; i < h; i++) { tx = x + Math.round(lean * Math.pow(i / h, 2) * 3); R(i % 3 === 2 ? "#6A4B2E" : "#8A6740", tx, base - i); }
+      const ty = base - h;
+      for (const s of [-1, 1]) {
+        for (let k = 1; k <= 7; k++) R(k < 5 ? "#2F7D3A" : "#3E9A4B", tx + s * k, ty + Math.floor(k * k / 7) - 1);
+        for (let k = 1; k <= 4; k++) R("#3E9A4B", tx + s * k, ty - 1 - Math.floor(k / 2) + Math.floor(k * k / 12));
+        R("#2F7D3A", tx + s * 2, ty + 1); R("#2F7D3A", tx + s * 4, ty + 2);
+      }
+      R("#3E9A4B", tx, ty - 2, 1, 2); R("#5A3E22", tx, ty + 1); R("#5A3E22", tx + 1, ty + 1);
+    };
+    // мечеть: купол, арка входа, минарет
+    const mq = Math.round(cw * 0.34), mb = hc - Math.round(dune(mq)) + 1, CREAM = "#F3E6C8", CS = "#D8C79F", DOME = "#2B8F9A", GOLD = "#E2B23C";
+    R(CREAM, mq - 9, mb - 11, 19, 11); R(CS, mq + 9, mb - 11, 1, 11); R("#E7D5AD", mq - 9, mb - 11, 19, 1);
+    for (let i = 0; i < 6; i++) { const k = Math.round(Math.sqrt(36 - i * i)) - 1; R(DOME, mq - k + 1, mb - 12 - i, 2 * k - 1, 1); }
+    R("#3FB0BC", mq - 3, mb - 15, 2, 1); R(GOLD, mq + 1, mb - 20, 1, 3); R(GOLD, mq, mb - 19);
+    R("#7C5A33", mq - 2, mb - 6, 5, 6); R(CREAM, mq - 1, mb - 7, 3, 1);
+    for (const dx of [-7, 6]) { R("#7C5A33", mq + dx, mb - 8, 2, 3); R("#7C5A33", mq + dx, mb - 4, 2, 2); }
+    const mn = mq + 13;
+    R(CREAM, mn, mb - 25, 3, 25); R(CS, mn + 2, mb - 25, 1, 25); R(DOME, mn - 1, mb - 20, 5, 1); R(DOME, mn - 1, mb - 26, 5, 1);
+    R(DOME, mn, mb - 28, 3, 2); R(DOME, mn + 1, mb - 30, 1, 2); R(GOLD, mn + 1, mb - 33, 1, 3);
+    // дома с «баджиль» (башнями-ловцами ветра)
+    const house = (x, w) => {
+      const b0 = hc - Math.round(dune(x + (w >> 1))) + 1, h = 8 + Math.floor(rnd() * 4);
+      R("#E3C89A", x, b0 - h, w, h); R("#C9A872", x + w - 1, b0 - h, 1, h); R("#EED8AE", x, b0 - h, w, 1);
+      for (let xx = x + 1; xx < x + w - 1; xx += 3) R("#5C4328", xx, b0 - h + 2, 1, 2);
+      R("#5C4328", x + (w >> 1), b0 - 4, 2, 4);
+      const tx = x + 1; R("#D9B97F", tx, b0 - h - 4, 3, 4); R("#5C4328", tx + 1, b0 - h - 3, 1, 2); R("#EED8AE", tx, b0 - h - 4, 3, 1);
+    };
+    house(Math.round(cw * 0.58), 9); house(Math.round(cw * 0.71), 8); house(Math.round(cw * 0.05), 8);
+    palm(Math.round(cw * 0.15), 15, 1); palm(Math.round(cw * 0.21), 11, -1);
+    palm(Math.round(cw * 0.52), 13, 1); palm(Math.round(cw * 0.86), 16, -1); palm(Math.round(cw * 0.93), 12, 1);
+  }
+
   function buildRegions(b) {
     const cw = Math.round(tileW / b);
     const L = (hc, paint) => cellLayer(cw, hc, b, paint);
@@ -1069,11 +1183,12 @@
       { far: L(70, paintYerevanFar), near: L(46, paintYerevanNear) },
       { far: L(64, paintBakuFar), near: L(44, paintBakuNear) },
       { far: L(62, paintTbilisiFar), near: L(46, paintTbilisiNear) },
+      { far: L(84, paintDubaiFar), near: L(46, paintDubaiNear) },
     ];
   }
 
   // ---------- Колонны городов: та же форма, что у трубы (оголовок + ствол), своя отделка ----------
-  const PIPE_SKIN = ["green", "kremlin", "santorini", "yerevan", "carpet", "tbilisi"];
+  const PIPE_SKIN = ["green", "kremlin", "santorini", "yerevan", "carpet", "tbilisi", "dubai"];
   function pipeSkin(pw, capH, b, paint) {
     const cw = Math.round(pw / b), ch = Math.ceil(H / b) + 1, cr = Math.round(capH / b);
     return offscreen(pw, H, (g) => {
@@ -1267,6 +1382,30 @@
     });
   }
 
+  // Дубай: песчаник с бирюзовой и золотой геометрической вязью, оголовок с зубцами
+  function paintArabPipe(R, cw, ch, cr) {
+    const SAND = "#E6C98F", SL = "#F3DFAF", SD = "#C9A66B", TEAL = "#1F8F9B", TL = "#4DB8C3", GOLD = "#E2B23C", IV = "#F7EBCB";
+    R(SAND, 2, cr, cw - 4, ch - cr);
+    R(SL, 2, cr, 2, ch - cr); R(SD, cw - 4, cr, 2, ch - cr);
+    for (const x of [4, cw - 6]) { R(TEAL, x, cr, 1, ch - cr); }
+    const c = Math.floor(cw / 2);
+    for (let yc = cr + 9; yc < ch + 8; yc += 18) {
+      for (let dy = -7; dy <= 7; dy++) { const k = 7 - Math.abs(dy); R(TEAL, c - k, yc + dy, 2 * k + 1, 1); } // ромб
+      for (let dy = -5; dy <= 5; dy++) { const k = 5 - Math.abs(dy); R(IV, c - k, yc + dy, 2 * k + 1, 1); }
+      for (let dy = -3; dy <= 3; dy++) { const k = 3 - Math.abs(dy); R(GOLD, c - k, yc + dy, 2 * k + 1, 1); }
+      R(TEAL, c, yc - 1, 1, 3); R(TEAL, c - 1, yc, 3, 1); R(IV, c, yc);
+      R(TL, c - 7, yc, 1, 1); R(TL, c + 7, yc, 1, 1);
+      R(GOLD, 5, yc + 9, cw - 10, 1); R(TEAL, 5, yc + 10, cw - 10, 1); // поясок между медальонами
+    }
+    pipeSides(R, cw, cr, ch - cr);
+    R(SAND, 1, 1, cw - 2, cr - 2); R(SL, 1, 1, cw - 2, 1);
+    for (let x = 2; x < cw - 2; x += 4) { R(SD, x, 2, 2, 1); R(SL, x, 1, 2, 1); } // зубцы
+    R(TEAL, 1, 3, cw - 2, 1);
+    for (let x = 3; x < cw - 2; x += 3) R(GOLD, x, 4);
+    R(SD, 1, cr - 2, cw - 2, 1);
+    pipeCap(R, cw, cr);
+  }
+
   function buildPipeSkins(pw, capH, b) {
     const S = (paint) => pipeSkin(pw, capH, b, paint);
     return {
@@ -1274,6 +1413,7 @@
       white: S((R, cw, ch, cr) => paintColumnPipe(R, cw, ch, cr, MARBLE)),
       blue: S((R, cw, ch, cr) => paintColumnPipe(R, cw, ch, cr, AEGEAN)),
       carpet: S(paintCarpetPipe),
+      dubai: S(paintArabPipe),
       tbilisi: clothPipe(pw, capH, b, ["khachapuri", "khinkali"], "georgia", false),
       tbilisi_top: clothPipe(pw, capH, b, ["khinkali", "khachapuri"], "georgia", true),
       yerevan: clothPipe(pw, capH, b, ["pomegranate", "dolma", "pakhlava"], "armenia", false),
