@@ -160,10 +160,10 @@
 "use strict";
 (() => {
   // ---------- Настройки (единицы дизайна, умножаются на u) ----------
-  const VERSION = "1.22";
+  const VERSION = "1.23";
   const CFG = {
     gravity: 1750, flap: 540, maxFall: 900, speed: 175,
-    pipeWidth: 70, pipeSpacing: 235, baseGap: 185, minGap: 185,
+    pipeWidth: 70, pipeSpacing: 235, baseGap: 165, minGap: 165,
     birdHeight: 60, hitRadius: 22, hitScale: 0.88, maxRise: 120, maxDrop: 165,  // персонаж поменьше — проходить проёмы легче
     regionFrom: 6,    // до этого счёта — Зелёная долина, дальше случайные города
     regionEvery: 10,  // смена города каждые N труб
@@ -189,6 +189,12 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch {} },
   };
+  // однократный сброс личных рекордов у всех игроков (количество попыток gamesPlayed остаётся)
+  if (store.get("recordsReset", "") !== "2026-10-07") {
+    store.set("bestScore", "0");
+    store.set("lbSent", "0");
+    store.set("recordsReset", "2026-10-07");
+  }
 
   // ---------- Картинки ----------
   const img = (src) => new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = src; });
