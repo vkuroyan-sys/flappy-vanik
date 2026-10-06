@@ -1,4 +1,4 @@
-const CACHE = "flappy-vanik-v10";
+const CACHE = "flappy-vanik-v11";
 const ASSETS = ["./", "index.html", "manifest.webmanifest", "vanik.png", "title.png",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
